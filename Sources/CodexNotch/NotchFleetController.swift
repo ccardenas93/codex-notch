@@ -31,6 +31,10 @@ final class NotchFleetController {
         model.onAddNotch = { [weak self] in
             self?.addNotch()
         }
+        model.onCloseNotch = { [weak self, weak model] in
+            guard let model else { return }
+            self?.removeNotch(model)
+        }
         let panel = NotchPanelController(model: model)
         models.append(model)
         panels.append(panel)
@@ -41,10 +45,26 @@ final class NotchFleetController {
 
     private func updateFleetState() {
         let canAdd = models.count < Self.maximumNotches
+        let canClose = models.count > 1
         for model in models {
             model.canAddNotch = canAdd
+            model.canCloseNotch = canClose
             model.notchCount = models.count
         }
+    }
+
+    private func removeNotch(_ model: AppModel) {
+        guard models.count > 1,
+              let index = models.firstIndex(where: { $0 === model }) else { return }
+
+        model.onAddNotch = nil
+        model.onCloseNotch = nil
+        model.shutdown()
+        panels[index].closePanel()
+        models.remove(at: index)
+        panels.remove(at: index)
+        updateFleetState()
+        layout(animated: true)
     }
 
     private func layout(animated: Bool) {

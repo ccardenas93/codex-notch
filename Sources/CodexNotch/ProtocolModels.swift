@@ -52,15 +52,29 @@ struct CodexModelOption: Identifiable, Equatable {
     let isDefault: Bool
 }
 
+struct QueuedCodexMessage: Identifiable, Equatable {
+    let id = UUID()
+    let text: String
+}
+
 enum PendingInteractionKind: Equatable {
     case questions([CodexQuestion])
     case approval(title: String, detail: String, allowsSessionApproval: Bool)
+}
+
+enum InteractionResponseStyle {
+    case standardApproval
+    case legacyApproval
+    case permissions(requested: [String: Any])
+    case elicitation
+    case questions
 }
 
 struct PendingInteraction {
     let requestID: Any
     let method: String
     let kind: PendingInteractionKind
+    let responseStyle: InteractionResponseStyle
 }
 
 enum NotchStatus: Equatable {

@@ -10,10 +10,11 @@ A native, always-available terminal for macOS. It sits at the top center of a di
 - Includes a playful Brain Deck that discovers the live Codex model catalog, explains effort as a fast-to-deep spectrum, and remembers the choice.
 - Adds up to six independent notches from the `+` button and keeps the whole fleet centered as it grows.
 - Accepts normal Codex prompts in the built-in composer.
-- Steers an active turn when you send another instruction while Codex is working.
+- Queues follow-up messages while Codex is working, with remove, clear, and run-next controls.
+- Shows a minimalist session strip for Build/Plan mode, context remaining, queue depth, model/effort, and Stop.
 - Streams assistant text and live activity into the notch.
 - Renders `request_user_input` questions as option buttons plus a custom-answer field.
-- Handles command and file-change approvals with approve, session approval, and deny actions.
+- Handles current and legacy command/file approvals, extra-permission requests, and connected-tool confirmations with explicit accept, session approval, and reject actions.
 - Uses an animated rainbow edge while working, yellow attention pulse, green approval flash, cyan choice flash, and red denial shake.
 - Respects the macOS Reduce Motion setting.
 
@@ -34,8 +35,11 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 - While a command is running, type interactive input normally or use the stop button to send Ctrl-C.
 - Type `codex` to enter Codex; type `/exit` to return to the terminal.
 - In Codex mode, use the brain button to choose the model and reasoning effort for the next turn.
+- Toggle **BUILD / PLAN** before a turn, watch the context ring, and press **STOP** (or Command-period) to interrupt active work.
+- Sending while a turn is active adds a visible queue item instead of losing or merging the instruction.
 - Hover a model card to read its full description in the animated ticker.
 - Use `+` from any notch to add another independent terminal/Codex workspace, up to six.
+- Use `−` to remove an idle notch. If it is running a command or Codex turn, confirm **Stop & close** first; the other workspaces are unaffected.
 - Use **New thread** for a clean conversation.
 - Clicking another app or window immediately collapses the panel back to the notch.
 - Use the × button to collapse. Right-click the notch and choose **Quit Codex Notch** to quit it manually; the installed keep-alive service will reopen it.

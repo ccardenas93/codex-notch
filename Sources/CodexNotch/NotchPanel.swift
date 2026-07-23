@@ -58,6 +58,7 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     private let collapsedSize = NSSize(width: 260, height: 44)
     private let expandedSize = NSSize(width: 620, height: 520)
     private var horizontalCenter: CGFloat?
+    private var observers: [NSObjectProtocol] = []
 
     init(model: AppModel) {
         self.model = model
@@ -91,16 +92,16 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         position(size: collapsedSize, animated: false)
         panel.orderFrontRegardless()
 
-        NotificationCenter.default.addObserver(
+        observers.append(NotificationCenter.default.addObserver(
             forName: .codexNotchExpansionChanged,
             object: model,
             queue: .main
         ) { [weak self] notification in
             guard let expanded = notification.userInfo?["expanded"] as? Bool else { return }
             MainActor.assumeIsolated { self?.setExpanded(expanded) }
-        }
+        })
 
-        NotificationCenter.default.addObserver(
+        observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
@@ -109,15 +110,15 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
                 guard let self else { return }
                 self.position(size: self.panel.frame.size, animated: false)
             }
-        }
+        })
 
-        NotificationCenter.default.addObserver(
+        observers.append(NotificationCenter.default.addObserver(
             forName: NSApplication.didResignActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.model.minimizeForFocusLoss() }
-        }
+        })
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -137,6 +138,16 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     func setHorizontalCenter(_ center: CGFloat, animated: Bool) {
         horizontalCenter = center
         position(size: panel.frame.size, animated: animated)
+    }
+
+    func closePanel() {
+        for observer in observers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        observers.removeAll()
+        panel.delegate = nil
+        panel.orderOut(nil)
+        panel.close()
     }
 
     private func position(size: NSSize, animated: Bool) {

@@ -89,7 +89,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                             .joined(separator: ",")
                         print("MODEL:\(name)|EFFORTS:\(efforts)")
                     }
-                    NSApplication.shared.terminate(nil)
+                    server.request(method: "collaborationMode/list", params: [:]) { result in
+                        switch result {
+                        case .success(let payload):
+                            let modes = (payload["data"] as? [[String: Any]] ?? [])
+                                .compactMap { $0["mode"] as? String ?? $0["name"] as? String }
+                                .joined(separator: ",")
+                            print("COLLABORATION_MODES:\(modes)")
+                        case .failure(let error):
+                            print("COLLABORATION_MODE_ERROR:\(error.localizedDescription)")
+                        }
+                        NSApplication.shared.terminate(nil)
+                    }
                 }
             }
         } catch {

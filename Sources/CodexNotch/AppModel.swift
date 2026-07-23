@@ -19,9 +19,17 @@ final class AppModel: ObservableObject {
     @Published var selectedModelID: String?
     @Published var selectedEffort: String?
     @Published var canAddNotch = true
+    @Published var canCloseNotch = false
     @Published var notchCount = 1
+    @Published var showCloseConfirmation = false
+    @Published var collaborationMode = "default"
+    @Published var contextUsedTokens: Int64 = 0
+    @Published var contextWindowTokens: Int64?
+    @Published var queuedMessages: [QueuedCodexMessage] = []
+    @Published var isStoppingTurn = false
 
     var onAddNotch: (() -> Void)?
+    var onCloseNotch: (() -> Void)?
 
     private let server = CodexServer()
     private let terminal = TerminalSession()
@@ -36,12 +44,15 @@ final class AppModel: ObservableObject {
     private let persistedThreadKey: String
     private let persistedModelKey: String
     private let persistedEffortKey: String
+    private let persistedModeKey: String
 
     init(slot: Int = 0) {
         let suffix = slot == 0 ? "" : ".slot\(slot + 1)"
         persistedThreadKey = "CodexNotch.threadID\(suffix)"
         persistedModelKey = "CodexNotch.model\(suffix)"
         persistedEffortKey = "CodexNotch.effort\(suffix)"
+        persistedModeKey = "CodexNotch.mode\(suffix)"
+        collaborationMode = UserDefaults.standard.string(forKey: persistedModeKey) ?? "default"
     }
 
     var needsAttention: Bool { pendingInteraction != nil }
@@ -54,7 +65,10 @@ final class AppModel: ObservableObject {
     }
 
     var composerPlaceholder: String {
-        workspaceMode == .terminal ? "Run a command…  (type codex to enter)" : "Tell Codex what to do…"
+        if workspaceMode == .terminal {
+            return "Run a command…  (type codex to enter)"
+        }
+        return turnID == nil ? "Tell Codex what to do…" : "Queue a follow-up…"
     }
 
     var selectedModel: CodexModelOption? {
@@ -64,6 +78,18 @@ final class AppModel: ObservableObject {
     var modelSelectionSummary: String {
         guard let selectedModel else { return "Codex default" }
         return "\(selectedModel.displayName) · \(selectedEffort ?? selectedModel.defaultEffort)"
+    }
+
+    var hasActiveCodexTurn: Bool { turnID != nil }
+
+    var contextRemainingFraction: Double? {
+        guard let contextWindowTokens, contextWindowTokens > 0 else { return nil }
+        return max(0, min(1, Double(contextWindowTokens - contextUsedTokens) / Double(contextWindowTokens)))
+    }
+
+    var contextLabel: String {
+        guard let fraction = contextRemainingFraction else { return "CTX —" }
+        return "CTX \(Int((fraction * 100).rounded()))%"
     }
 
     func start() {
@@ -175,12 +201,70 @@ final class AppModel: ObservableObject {
         terminal.interrupt()
     }
 
+    func interruptCodexTurn() {
+        guard let threadID, let turnID, !isStoppingTurn else { return }
+        isStoppingTurn = true
+        activity = "Stopping Codex"
+        server.request(
+            method: "turn/interrupt",
+            params: ["threadId": threadID, "turnId": turnID]
+        ) { [weak self] result in
+            if case .failure(let error) = result {
+                self?.isStoppingTurn = false
+                self?.status = .failed(error.localizedDescription)
+                self?.activity = error.localizedDescription
+            }
+        }
+    }
+
+    func setCollaborationMode(_ mode: String) {
+        guard turnID == nil, mode == "default" || mode == "plan" else { return }
+        collaborationMode = mode
+        UserDefaults.standard.set(mode, forKey: persistedModeKey)
+        activity = mode == "plan" ? "Plan mode · next turn" : "Build mode · next turn"
+        triggerFeedback(.choiceChanged)
+    }
+
+    func removeQueuedMessage(_ id: UUID) {
+        queuedMessages.removeAll(where: { $0.id == id })
+    }
+
+    func clearQueuedMessages() {
+        queuedMessages.removeAll()
+    }
+
+    func runNextQueuedMessage() {
+        guard turnID == nil, !queuedMessages.isEmpty else { return }
+        let next = queuedMessages.removeFirst()
+        sendPrompt(next.text)
+    }
+
     func addNotch() {
         guard canAddNotch else {
             activity = "Six notches is the maximum"
             return
         }
         onAddNotch?()
+    }
+
+    func requestCloseNotch() {
+        guard canCloseNotch else { return }
+        if terminalBusy || turnID != nil {
+            showCloseConfirmation = true
+            isExpanded = true
+        } else {
+            onCloseNotch?()
+        }
+    }
+
+    func confirmCloseNotch() {
+        guard canCloseNotch else { return }
+        showCloseConfirmation = false
+        onCloseNotch?()
+    }
+
+    func cancelCloseNotch() {
+        showCloseConfirmation = false
     }
 
     func returnToTerminal() {
@@ -200,22 +284,9 @@ final class AppModel: ObservableObject {
             queuedPrompt = text
             return
         }
-        if let activeTurnID = turnID {
-            entries.append(ChatEntry(role: .user, text: text))
-            activity = "Steering the active turn"
-            server.request(
-                method: "turn/steer",
-                params: [
-                    "threadId": threadID,
-                    "expectedTurnId": activeTurnID,
-                    "input": [["type": "text", "text": text]],
-                ]
-            ) { [weak self] result in
-                if case .failure(let error) = result {
-                    self?.status = .failed(error.localizedDescription)
-                    self?.activity = error.localizedDescription
-                }
-            }
+        if turnID != nil {
+            queuedMessages.append(QueuedCodexMessage(text: text))
+            activity = "\(queuedMessages.count) follow-up\(queuedMessages.count == 1 ? "" : "s") queued"
             return
         }
 
@@ -233,6 +304,14 @@ final class AppModel: ObservableObject {
         if let selectedModel {
             params["model"] = selectedModel.model
             params["effort"] = selectedEffort ?? selectedModel.defaultEffort
+            params["collaborationMode"] = [
+                "mode": collaborationMode,
+                "settings": [
+                    "model": selectedModel.model,
+                    "reasoning_effort": selectedEffort ?? selectedModel.defaultEffort,
+                    "developer_instructions": NSNull(),
+                ],
+            ]
         }
 
         server.request(method: "turn/start", params: params) { [weak self] result in
@@ -259,7 +338,29 @@ final class AppModel: ObservableObject {
 
     func answerApproval(_ decision: String) {
         guard let interaction = pendingInteraction else { return }
-        server.respond(id: interaction.requestID, result: ["decision": decision])
+        let result: [String: Any]
+        switch interaction.responseStyle {
+        case .standardApproval:
+            result = ["decision": decision]
+        case .legacyApproval:
+            let legacyDecision: Any
+            switch decision {
+            case "accept": legacyDecision = "approved"
+            case "acceptForSession": legacyDecision = "approved_for_session"
+            default: legacyDecision = ["denied": ["rejection": "User declined in Codex Notch"]]
+            }
+            result = ["decision": legacyDecision]
+        case .permissions(let requested):
+            result = [
+                "permissions": decision == "decline" ? [:] : requested,
+                "scope": decision == "acceptForSession" ? "session" : "turn",
+            ]
+        case .elicitation:
+            result = ["action": decision == "decline" ? "decline" : "accept"]
+        case .questions:
+            return
+        }
+        server.respond(id: interaction.requestID, result: result)
         triggerFeedback(decision == "decline" ? .denied : .approved)
         pendingInteraction = nil
         status = .working
@@ -506,6 +607,7 @@ final class AppModel: ObservableObject {
         case "turn/started":
             let turn = params["turn"] as? [String: Any]
             turnID = turn?["id"] as? String
+            isStoppingTurn = false
             status = .working
             activity = "Codex is thinking"
 
@@ -527,7 +629,25 @@ final class AppModel: ObservableObject {
         case "turn/diff/updated":
             activity = "Preparing file changes"
 
+        case "thread/tokenUsage/updated":
+            guard let tokenUsage = params["tokenUsage"] as? [String: Any],
+                  let last = tokenUsage["last"] as? [String: Any] else { return }
+            contextUsedTokens = (last["inputTokens"] as? NSNumber)?.int64Value ?? contextUsedTokens
+            if let window = tokenUsage["modelContextWindow"] as? NSNumber {
+                contextWindowTokens = window.int64Value
+            }
+
+        case "thread/settings/updated":
+            if let settings = params["threadSettings"] as? [String: Any],
+               let collaboration = settings["collaborationMode"] as? [String: Any],
+               let mode = collaboration["mode"] as? String {
+                collaborationMode = mode
+                UserDefaults.standard.set(mode, forKey: persistedModeKey)
+            }
+
         case "turn/completed":
+            let wasStopping = isStoppingTurn
+            isStoppingTurn = false
             turnID = nil
             pendingInteraction = nil
             selectedAnswers.removeAll()
@@ -536,11 +656,19 @@ final class AppModel: ObservableObject {
             if turnStatus == "completed" {
                 status = .done
                 activity = "Turn complete"
+            } else if turnStatus == "interrupted" {
+                status = .ready
+                activity = queuedMessages.isEmpty ? "Stopped" : "Stopped · \(queuedMessages.count) queued"
             } else {
                 status = .failed("Turn ended: \(turnStatus)")
                 activity = "Turn ended: \(turnStatus)"
             }
             isExpanded = isPinned
+            if !wasStopping, turnStatus == "completed", !queuedMessages.isEmpty {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) { [weak self] in
+                    self?.runNextQueuedMessage()
+                }
+            }
 
         case "error":
             let error = params["error"] as? [String: Any]
@@ -558,7 +686,12 @@ final class AppModel: ObservableObject {
         switch method {
         case "item/tool/requestUserInput":
             let questions = ProtocolParser.questions(from: params)
-            pendingInteraction = PendingInteraction(requestID: id, method: method, kind: .questions(questions))
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .questions(questions),
+                responseStyle: .questions
+            )
             selectedAnswers.removeAll()
             status = .needsInput
             activity = questions.first?.prompt ?? "Codex has a question"
@@ -570,7 +703,8 @@ final class AppModel: ObservableObject {
             pendingInteraction = PendingInteraction(
                 requestID: id,
                 method: method,
-                kind: .approval(title: "Allow this command?", detail: reason ?? command, allowsSessionApproval: true)
+                kind: .approval(title: "Allow this command?", detail: reason ?? command, allowsSessionApproval: true),
+                responseStyle: .standardApproval
             )
             status = .needsInput
             activity = "Command approval needed"
@@ -580,15 +714,86 @@ final class AppModel: ObservableObject {
             pendingInteraction = PendingInteraction(
                 requestID: id,
                 method: method,
-                kind: .approval(title: "Apply these file changes?", detail: "Codex is ready to edit files in this workspace.", allowsSessionApproval: false)
+                kind: .approval(title: "Apply these file changes?", detail: "Codex is ready to edit files in this workspace.", allowsSessionApproval: false),
+                responseStyle: .standardApproval
             )
             status = .needsInput
             activity = "File-change approval needed"
             isExpanded = true
 
+        case "execCommandApproval":
+            let command = (params["command"] as? [String])?.joined(separator: " ")
+                ?? params["command"] as? String
+                ?? "Run the requested command"
+            let detail = params["reason"] as? String ?? command
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .approval(title: "Allow this command?", detail: detail, allowsSessionApproval: true),
+                responseStyle: .legacyApproval
+            )
+            presentInteraction("Command approval needed")
+
+        case "applyPatchApproval":
+            let files = (params["fileChanges"] as? [String: Any])?.keys.sorted().joined(separator: "\n")
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .approval(
+                    title: "Apply these file changes?",
+                    detail: params["reason"] as? String ?? files ?? "Codex is ready to edit files.",
+                    allowsSessionApproval: params["grantRoot"] != nil
+                ),
+                responseStyle: .legacyApproval
+            )
+            presentInteraction("File-change approval needed")
+
+        case "item/permissions/requestApproval":
+            let permissions = params["permissions"] as? [String: Any] ?? [:]
+            let reason = params["reason"] as? String
+            let cwd = params["cwd"] as? String
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .approval(
+                    title: "Grant extra access?",
+                    detail: reason ?? cwd.map { "Codex is requesting access from \($0)." } ?? "Codex is requesting additional permissions.",
+                    allowsSessionApproval: true
+                ),
+                responseStyle: .permissions(requested: permissions)
+            )
+            presentInteraction("Permission approval needed")
+
+        case "mcpServer/elicitation/request":
+            let serverName = params["serverName"] as? String ?? "Connected tool"
+            let message = params["message"] as? String ?? "A connected tool needs your confirmation."
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .approval(title: "\(serverName) is asking", detail: message, allowsSessionApproval: false),
+                responseStyle: .elicitation
+            )
+            presentInteraction("Connected tool needs input")
+
         default:
-            server.respond(id: id, result: [:])
+            pendingInteraction = PendingInteraction(
+                requestID: id,
+                method: method,
+                kind: .approval(
+                    title: "Codex needs confirmation",
+                    detail: "Request: \(method)\nThis request type is newer than Codex Notch. Accept only if you recognize it.",
+                    allowsSessionApproval: false
+                ),
+                responseStyle: .standardApproval
+            )
+            presentInteraction("Confirmation needed")
         }
+    }
+
+    private func presentInteraction(_ message: String) {
+        status = .needsInput
+        activity = message
+        isExpanded = true
     }
 
     private func submitAnswersIfComplete() {

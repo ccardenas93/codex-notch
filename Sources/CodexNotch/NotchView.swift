@@ -46,6 +46,9 @@ struct NotchView: View {
                 Button("Return to terminal", action: model.returnToTerminal)
                 Button("New Codex thread", action: model.newThread)
             }
+            if model.canCloseNotch {
+                Button("Close this notch", role: .destructive, action: model.requestCloseNotch)
+            }
             Divider()
             Button("Quit Codex Notch") { NSApplication.shared.terminate(nil) }
         }
@@ -79,12 +82,24 @@ struct NotchView: View {
         VStack(spacing: 14) {
             header
             Divider().overlay(.white.opacity(0.09))
+            if model.workspaceMode == .codex {
+                CodexControlStrip(model: model)
+            }
+            if model.workspaceMode == .codex, !model.queuedMessages.isEmpty {
+                MessageQueueStrip(model: model)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             if model.workspaceMode == .codex, showBrainDeck {
                 BrainDeck(model: model)
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
             transcript
-            if let interaction = model.pendingInteraction {
+            if model.showCloseConfirmation {
+                CloseNotchCard(
+                    cancel: model.cancelCloseNotch,
+                    close: model.confirmCloseNotch
+                )
+            } else if let interaction = model.pendingInteraction {
                 interactionView(interaction)
             }
             composer
@@ -134,6 +149,13 @@ struct NotchView: View {
                 isDisabled: !model.canAddNotch,
                 action: model.addNotch
             )
+            if model.canCloseNotch {
+                HeaderButton(
+                    icon: "minus",
+                    label: "Close this notch",
+                    action: model.requestCloseNotch
+                )
+            }
             HeaderButton(
                 icon: model.isPinned ? "pin.fill" : "pin",
                 label: model.isPinned ? "Unpin" : "Keep open",
@@ -289,7 +311,7 @@ private struct SelectableTranscript: NSViewRepresentable {
                 .onSubmit(model.sendComposer)
 
             Button(action: model.sendComposer) {
-                Image(systemName: "arrow.up")
+                Image(systemName: model.hasActiveCodexTurn ? "text.badge.plus" : "arrow.up")
                     .font(.system(size: 13, weight: .bold))
                     .frame(width: 40, height: 40)
                     .foregroundStyle(model.canSend ? .black : .white.opacity(0.28))
@@ -298,7 +320,214 @@ private struct SelectableTranscript: NSViewRepresentable {
             .buttonStyle(.plain)
             .disabled(!model.canSend)
             .keyboardShortcut(.return, modifiers: .command)
-            .accessibilityLabel("Send to Codex")
+            .accessibilityLabel(model.hasActiveCodexTurn ? "Queue for Codex" : "Send to Codex")
+        }
+    }
+}
+
+private struct CodexControlStrip: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Button {
+                model.setCollaborationMode(model.collaborationMode == "plan" ? "default" : "plan")
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: model.collaborationMode == "plan" ? "map.fill" : "hammer.fill")
+                        .font(.system(size: 8.5, weight: .bold))
+                    Text(model.collaborationMode == "plan" ? "PLAN" : "BUILD")
+                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .tracking(0.7)
+                }
+                .foregroundStyle(model.collaborationMode == "plan" ? Color.purple : Color.cyan)
+                .padding(.horizontal, 9)
+                .frame(height: 26)
+                .background(.white.opacity(0.045), in: Capsule())
+                .overlay {
+                    Capsule()
+                        .stroke(
+                            (model.collaborationMode == "plan" ? Color.purple : Color.cyan).opacity(0.25),
+                            lineWidth: 1
+                        )
+                }
+            }
+            .buttonStyle(.plain)
+            .disabled(model.hasActiveCodexTurn)
+            .opacity(model.hasActiveCodexTurn ? 0.48 : 1)
+            .help(model.hasActiveCodexTurn ? "Mode is locked during an active turn" : "Switch Build / Plan mode")
+
+            ContextMeter(
+                label: model.contextLabel,
+                fraction: model.contextRemainingFraction
+            )
+
+            HStack(spacing: 4) {
+                Image(systemName: "text.line.first.and.arrowtriangle.forward")
+                    .font(.system(size: 8))
+                Text("Q \(model.queuedMessages.count)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+            }
+            .foregroundStyle(model.queuedMessages.isEmpty ? .white.opacity(0.28) : .yellow.opacity(0.8))
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(.white.opacity(0.035), in: Capsule())
+
+            Spacer()
+
+            Text(model.modelSelectionSummary.uppercased())
+                .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.28))
+                .lineLimit(1)
+
+            if model.hasActiveCodexTurn {
+                Button(action: model.interruptCodexTurn) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 7.5))
+                        Text(model.isStoppingTurn ? "STOPPING" : "STOP")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 9)
+                    .frame(height: 26)
+                    .background(Color.red.opacity(0.1), in: Capsule())
+                    .overlay { Capsule().stroke(Color.red.opacity(0.28), lineWidth: 1) }
+                }
+                .buttonStyle(.plain)
+                .disabled(model.isStoppingTurn)
+                .keyboardShortcut(".", modifiers: .command)
+                .help("Stop the active Codex turn")
+            }
+        }
+        .frame(height: 28)
+    }
+}
+
+private struct ContextMeter: View {
+    let label: String
+    let fraction: Double?
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.08), lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: fraction ?? 0)
+                    .stroke(contextColor, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: 13, height: 13)
+            Text(label)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+        }
+        .foregroundStyle(.white.opacity(0.5))
+        .padding(.horizontal, 8)
+        .frame(height: 26)
+        .background(.white.opacity(0.035), in: Capsule())
+        .help("Estimated model context remaining")
+    }
+
+    private var contextColor: Color {
+        guard let fraction else { return .white.opacity(0.2) }
+        if fraction < 0.15 { return .red }
+        if fraction < 0.35 { return .yellow }
+        return .cyan
+    }
+}
+
+private struct MessageQueueStrip: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("QUEUE")
+                .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                .tracking(1)
+                .foregroundStyle(.yellow.opacity(0.62))
+
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(Array(model.queuedMessages.enumerated()), id: \.element.id) { index, message in
+                        HStack(spacing: 5) {
+                            Text("\(index + 1)")
+                                .font(.system(size: 7, weight: .bold, design: .monospaced))
+                                .foregroundStyle(.yellow.opacity(0.6))
+                            Text(message.text)
+                                .font(.system(size: 9.5, design: .rounded))
+                                .foregroundStyle(.white.opacity(0.58))
+                                .lineLimit(1)
+                                .frame(maxWidth: 150)
+                            Button {
+                                model.removeQueuedMessage(message.id)
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.3))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.horizontal, 8)
+                        .frame(height: 24)
+                        .background(.white.opacity(0.04), in: Capsule())
+                    }
+                }
+            }
+            .scrollIndicators(.hidden)
+
+            if !model.hasActiveCodexTurn {
+                Button(action: model.runNextQueuedMessage) {
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(.green)
+                        .frame(width: 24, height: 24)
+                        .background(Color.green.opacity(0.1), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .help("Run next queued message")
+            }
+
+            Button(action: model.clearQueuedMessages) {
+                Image(systemName: "trash")
+                    .font(.system(size: 8))
+                    .foregroundStyle(.white.opacity(0.28))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Clear queue")
+        }
+        .frame(height: 26)
+    }
+}
+
+private struct CloseNotchCard: View {
+    let cancel: () -> Void
+    let close: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.red)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Stop this workspace?")
+                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("Its running command or Codex turn will be terminated. Other notches stay open.")
+                    .font(.system(size: 10.5, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            ActionButton(title: "Keep it", tint: .white, action: cancel)
+            ActionButton(title: "Stop & close", tint: .red, action: close)
+        }
+        .padding(12)
+        .background(Color.red.opacity(0.075), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.red.opacity(0.28), lineWidth: 1)
         }
     }
 }
