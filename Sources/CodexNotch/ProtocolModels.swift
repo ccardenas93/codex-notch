@@ -36,6 +36,22 @@ struct CodexQuestion: Identifiable, Equatable {
     let acceptsCustomAnswer: Bool
 }
 
+struct CodexEffortOption: Identifiable, Equatable {
+    var id: String { value }
+    let value: String
+    let description: String
+}
+
+struct CodexModelOption: Identifiable, Equatable {
+    let id: String
+    let model: String
+    let displayName: String
+    let description: String
+    let defaultEffort: String
+    let supportedEfforts: [CodexEffortOption]
+    let isDefault: Bool
+}
+
 enum PendingInteractionKind: Equatable {
     case questions([CodexQuestion])
     case approval(title: String, detail: String, allowsSessionApproval: Bool)

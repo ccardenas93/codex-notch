@@ -7,6 +7,7 @@ A native, always-available terminal for macOS. It sits at the top center of a di
 - Starts as a persistent PTY-backed `zsh` terminal with streaming output, interactive input, Ctrl-C interruption, and shell state such as `cd`.
 - Starts a local `codex app-server` only after you type `codex`, using your existing Codex login and configuration.
 - Keeps a thread between launches and offers a one-click fresh thread.
+- Includes a playful Brain Deck that discovers the live Codex model catalog, explains effort as a fast-to-deep spectrum, and remembers the choice.
 - Accepts normal Codex prompts in the built-in composer.
 - Steers an active turn when you send another instruction while Codex is working.
 - Streams assistant text and live activity into the notch.
@@ -31,6 +32,7 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 - Type normal shell commands and press Return.
 - While a command is running, type interactive input normally or use the stop button to send Ctrl-C.
 - Type `codex` to enter Codex; type `/exit` to return to the terminal.
+- In Codex mode, use the brain button to choose the model and reasoning effort for the next turn.
 - Use **New thread** for a clean conversation.
 - Clicking another app or window immediately collapses the panel back to the notch.
 - Use the × button to collapse. Right-click the notch and choose **Quit Codex Notch** to quit it manually; the installed keep-alive service will reopen it.

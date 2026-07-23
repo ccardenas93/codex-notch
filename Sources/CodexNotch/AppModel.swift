@@ -15,6 +15,9 @@ final class AppModel: ObservableObject {
     @Published var actionFeedback: ActionFeedback?
     @Published var feedbackNonce = 0
     @Published var terminalBusy = false
+    @Published var availableModels: [CodexModelOption] = []
+    @Published var selectedModelID: String?
+    @Published var selectedEffort: String?
 
     private let server = CodexServer()
     private let terminal = TerminalSession()
@@ -27,6 +30,8 @@ final class AppModel: ObservableObject {
     private var pointerInside = false
     private var panelFocused = false
     private let persistedThreadKey = "CodexNotch.threadID"
+    private let persistedModelKey = "CodexNotch.model"
+    private let persistedEffortKey = "CodexNotch.effort"
 
     var needsAttention: Bool { pendingInteraction != nil }
     var canSend: Bool {
@@ -39,6 +44,15 @@ final class AppModel: ObservableObject {
 
     var composerPlaceholder: String {
         workspaceMode == .terminal ? "Run a command…  (type codex to enter)" : "Tell Codex what to do…"
+    }
+
+    var selectedModel: CodexModelOption? {
+        availableModels.first(where: { $0.id == selectedModelID })
+    }
+
+    var modelSelectionSummary: String {
+        guard let selectedModel else { return "Codex default" }
+        return "\(selectedModel.displayName) · \(selectedEffort ?? selectedModel.defaultEffort)"
     }
 
     func start() {
@@ -192,14 +206,17 @@ final class AppModel: ObservableObject {
         pendingInteraction = nil
         selectedAnswers = [:]
 
-        server.request(
-            method: "turn/start",
-            params: [
-                "threadId": threadID,
-                "input": [["type": "text", "text": text]],
-                "cwd": FileManager.default.homeDirectoryForCurrentUser.path,
-            ]
-        ) { [weak self] result in
+        var params: [String: Any] = [
+            "threadId": threadID,
+            "input": [["type": "text", "text": text]],
+            "cwd": FileManager.default.homeDirectoryForCurrentUser.path,
+        ]
+        if let selectedModel {
+            params["model"] = selectedModel.model
+            params["effort"] = selectedEffort ?? selectedModel.defaultEffort
+        }
+
+        server.request(method: "turn/start", params: params) { [weak self] result in
             if case .failure(let error) = result {
                 self?.status = .failed(error.localizedDescription)
                 self?.activity = error.localizedDescription
@@ -242,6 +259,34 @@ final class AppModel: ObservableObject {
         status = .connecting
         activity = "Opening a fresh Codex thread"
         startNewThread()
+    }
+
+    func selectModel(_ modelID: String) {
+        guard let model = availableModels.first(where: { $0.id == modelID }) else { return }
+        selectedModelID = model.id
+        let savedEffort = UserDefaults.standard.string(forKey: persistedEffortKey)
+        if let savedEffort, model.supportedEfforts.contains(where: { $0.value == savedEffort }) {
+            selectedEffort = savedEffort
+        } else {
+            selectedEffort = model.defaultEffort
+        }
+        UserDefaults.standard.set(model.id, forKey: persistedModelKey)
+        UserDefaults.standard.set(selectedEffort, forKey: persistedEffortKey)
+        if turnID == nil {
+            activity = modelSelectionSummary
+        }
+        triggerFeedback(.choiceChanged)
+    }
+
+    func selectEffort(_ effort: String) {
+        guard let selectedModel,
+              selectedModel.supportedEfforts.contains(where: { $0.value == effort }) else { return }
+        selectedEffort = effort
+        UserDefaults.standard.set(effort, forKey: persistedEffortKey)
+        if turnID == nil {
+            activity = modelSelectionSummary
+        }
+        triggerFeedback(.choiceChanged)
     }
 
     private func runTerminalInput(_ text: String) {
@@ -322,11 +367,63 @@ final class AppModel: ObservableObject {
             case .success:
                 self.didInitialize = true
                 self.server.notify(method: "initialized")
+                self.loadModels()
                 self.restoreOrCreateThread()
             case .failure(let error):
                 self.status = .failed(error.localizedDescription)
                 self.activity = error.localizedDescription
                 self.isExpanded = true
+            }
+        }
+    }
+
+    private func loadModels() {
+        server.request(
+            method: "model/list",
+            params: ["includeHidden": false, "limit": 100]
+        ) { [weak self] result in
+            guard let self, case .success(let payload) = result,
+                  let rawModels = payload["data"] as? [[String: Any]] else { return }
+
+            let models = rawModels.compactMap { raw -> CodexModelOption? in
+                guard let id = raw["id"] as? String,
+                      let model = raw["model"] as? String,
+                      let displayName = raw["displayName"] as? String,
+                      let defaultEffort = raw["defaultReasoningEffort"] as? String else { return nil }
+
+                let efforts = (raw["supportedReasoningEfforts"] as? [[String: Any]] ?? []).compactMap {
+                    effort -> CodexEffortOption? in
+                    guard let value = effort["reasoningEffort"] as? String else { return nil }
+                    return CodexEffortOption(
+                        value: value,
+                        description: effort["description"] as? String ?? ""
+                    )
+                }
+
+                return CodexModelOption(
+                    id: id,
+                    model: model,
+                    displayName: displayName,
+                    description: raw["description"] as? String ?? "",
+                    defaultEffort: defaultEffort,
+                    supportedEfforts: efforts,
+                    isDefault: raw["isDefault"] as? Bool ?? false
+                )
+            }
+            guard !models.isEmpty else { return }
+            availableModels = models
+
+            let savedModel = UserDefaults.standard.string(forKey: persistedModelKey)
+            let initial = models.first(where: { $0.id == savedModel })
+                ?? models.first(where: \.isDefault)
+                ?? models[0]
+            selectedModelID = initial.id
+
+            let savedEffort = UserDefaults.standard.string(forKey: persistedEffortKey)
+            if let savedEffort, initial.supportedEfforts.contains(where: { $0.value == savedEffort }) {
+                selectedEffort = savedEffort
+            } else {
+                selectedEffort = initial.defaultEffort
             }
         }
     }

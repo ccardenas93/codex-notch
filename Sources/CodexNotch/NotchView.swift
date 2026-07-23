@@ -5,6 +5,7 @@ struct NotchView: View {
     @ObservedObject var model: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shakeCount: CGFloat = 0
+    @State private var showBrainDeck = false
 
     var body: some View {
         ZStack {
@@ -29,6 +30,9 @@ struct NotchView: View {
         .onChange(of: model.feedbackNonce) { _, _ in
             guard model.actionFeedback == .denied, !reduceMotion else { return }
             withAnimation(.linear(duration: 0.42)) { shakeCount += 4 }
+        }
+        .onChange(of: model.workspaceMode) { _, mode in
+            if mode == .terminal { showBrainDeck = false }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: model.isExpanded)
         .accessibilityElement(children: .contain)
@@ -71,6 +75,10 @@ struct NotchView: View {
         VStack(spacing: 14) {
             header
             Divider().overlay(.white.opacity(0.09))
+            if model.workspaceMode == .codex, showBrainDeck {
+                BrainDeck(model: model)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             transcript
             if let interaction = model.pendingInteraction {
                 interactionView(interaction)
@@ -101,6 +109,15 @@ struct NotchView: View {
                 .padding(.vertical, 5)
                 .background(.white.opacity(0.05), in: Capsule())
             if model.workspaceMode == .codex {
+                HeaderButton(
+                    icon: "brain.head.profile",
+                    label: "Choose model and effort",
+                    isActive: showBrainDeck
+                ) {
+                    withAnimation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86)) {
+                        showBrainDeck.toggle()
+                    }
+                }
                 HeaderButton(icon: "terminal", label: "Return to terminal", action: model.returnToTerminal)
                 HeaderButton(icon: "plus", label: "New thread", action: model.newThread)
             } else if model.terminalBusy {
@@ -271,6 +288,244 @@ private struct SelectableTranscript: NSViewRepresentable {
             .disabled(!model.canSend)
             .keyboardShortcut(.return, modifiers: .command)
             .accessibilityLabel("Send to Codex")
+        }
+    }
+}
+
+private struct BrainDeck: View {
+    @ObservedObject var model: AppModel
+
+    var body: some View {
+        VStack(spacing: 10) {
+            if let selected = model.selectedModel {
+                HStack(spacing: 10) {
+                    BrainOrb(effort: model.selectedEffort ?? selected.defaultEffort)
+                        .frame(width: 38, height: 38)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("BRAIN DECK")
+                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .tracking(1.3)
+                            .foregroundStyle(.cyan.opacity(0.72))
+                        Text(model.modelSelectionSummary)
+                            .font(.system(size: 13, weight: .semibold, design: .rounded))
+                            .foregroundStyle(.white)
+                    }
+                    Spacer()
+                    Text("APPLIES NEXT TURN")
+                        .font(.system(size: 7.5, weight: .bold, design: .monospaced))
+                        .tracking(0.8)
+                        .foregroundStyle(.white.opacity(0.28))
+                }
+
+                ScrollView(.horizontal) {
+                    HStack(spacing: 7) {
+                        ForEach(model.availableModels) { option in
+                            ModelChip(
+                                option: option,
+                                selected: option.id == model.selectedModelID,
+                                action: { model.selectModel(option.id) }
+                            )
+                        }
+                    }
+                }
+                .scrollIndicators(.hidden)
+
+                HStack(spacing: 6) {
+                    Text("FAST")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.25))
+                    ForEach(selected.supportedEfforts) { effort in
+                        EffortChip(
+                            effort: effort,
+                            selected: effort.value == model.selectedEffort,
+                            action: { model.selectEffort(effort.value) }
+                        )
+                    }
+                    Text("DEEP")
+                        .font(.system(size: 7, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.white.opacity(0.25))
+                }
+            } else {
+                HStack(spacing: 9) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(.cyan)
+                    Text("Discovering the brains available to this Codex account…")
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.52))
+                    Spacer()
+                }
+            }
+        }
+        .padding(11)
+        .background(
+            LinearGradient(
+                colors: [Color.cyan.opacity(0.09), Color.purple.opacity(0.055)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            ),
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.cyan.opacity(0.18), lineWidth: 1)
+        }
+    }
+}
+
+private struct ModelChip: View {
+    let option: CodexModelOption
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(option.displayName)
+                        .font(.system(size: 10.5, weight: .bold, design: .rounded))
+                        .lineLimit(1)
+                    if option.isDefault {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 4, height: 4)
+                    }
+                }
+                Text(option.description)
+                    .font(.system(size: 8.5, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.38))
+                    .lineLimit(1)
+            }
+            .foregroundStyle(.white)
+            .frame(width: 126, alignment: .leading)
+            .padding(.horizontal, 9)
+            .padding(.vertical, 7)
+            .background(
+                selected ? Color.cyan.opacity(0.16) : Color.white.opacity(0.045),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(selected ? Color.cyan.opacity(0.55) : Color.white.opacity(0.06), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .help(option.description)
+    }
+}
+
+private struct EffortChip: View {
+    let effort: CodexEffortOption
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 1) {
+                Image(systemName: EffortStyle.icon(for: effort.value))
+                    .font(.system(size: 9, weight: .semibold))
+                Text(EffortStyle.name(for: effort.value))
+                    .font(.system(size: 8.5, weight: .bold, design: .rounded))
+                Text(effort.value.uppercased())
+                    .font(.system(size: 6.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.34))
+            }
+            .foregroundStyle(selected ? EffortStyle.color(for: effort.value) : .white.opacity(0.6))
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                selected ? EffortStyle.color(for: effort.value).opacity(0.14) : Color.white.opacity(0.035),
+                in: RoundedRectangle(cornerRadius: 9, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .stroke(
+                        selected ? EffortStyle.color(for: effort.value).opacity(0.5) : Color.clear,
+                        lineWidth: 1
+                    )
+            }
+        }
+        .buttonStyle(.plain)
+        .help(effort.description)
+        .accessibilityLabel("\(effort.value) reasoning effort")
+        .accessibilityHint(effort.description)
+    }
+}
+
+private struct BrainOrb: View {
+    let effort: String
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
+            let phase = timeline.date.timeIntervalSinceReferenceDate
+            ZStack {
+                Circle()
+                    .fill(EffortStyle.color(for: effort).opacity(0.12))
+                Circle()
+                    .trim(from: 0.08, to: 0.68)
+                    .stroke(
+                        AngularGradient(
+                            colors: [.cyan, .purple, EffortStyle.color(for: effort), .cyan],
+                            center: .center
+                        ),
+                        style: StrokeStyle(lineWidth: 2, lineCap: .round)
+                    )
+                    .rotationEffect(.degrees(phase * EffortStyle.velocity(for: effort)))
+                    .padding(3)
+                Image(systemName: "brain.head.profile")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(EffortStyle.color(for: effort))
+            }
+        }
+    }
+}
+
+private enum EffortStyle {
+    static func name(for value: String) -> String {
+        switch value.lowercased() {
+        case "minimal", "none": return "Blink"
+        case "low": return "Zip"
+        case "medium": return "Flow"
+        case "high": return "Deep"
+        case "xhigh": return "Abyss"
+        case "max": return "Orbit"
+        case "ultra": return "Nova"
+        default: return value.capitalized
+        }
+    }
+
+    static func icon(for value: String) -> String {
+        switch value.lowercased() {
+        case "minimal", "none": return "bolt.fill"
+        case "low": return "hare.fill"
+        case "medium": return "sparkles"
+        case "high": return "brain.head.profile"
+        case "xhigh": return "tornado"
+        case "max": return "globe.americas.fill"
+        case "ultra": return "sun.max.fill"
+        default: return "dial.medium"
+        }
+    }
+
+    static func color(for value: String) -> Color {
+        switch value.lowercased() {
+        case "minimal", "none", "low": return .green
+        case "medium": return .cyan
+        case "high": return .blue
+        case "xhigh": return .purple
+        case "max", "ultra": return .pink
+        default: return .white
+        }
+    }
+
+    static func velocity(for value: String) -> Double {
+        switch value.lowercased() {
+        case "minimal", "none", "low": return 160
+        case "medium": return 110
+        case "high": return 78
+        case "xhigh": return 52
+        case "max", "ultra": return 34
+        default: return 90
         }
     }
 }
@@ -581,15 +836,20 @@ private struct ActionButton: View {
 private struct HeaderButton: View {
     let icon: String
     let label: String
+    var isActive = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.54))
+                .foregroundStyle(isActive ? Color.cyan : .white.opacity(0.54))
                 .frame(width: 28, height: 28)
-                .background(.white.opacity(0.055), in: Circle())
+                .background(isActive ? Color.cyan.opacity(0.14) : .white.opacity(0.055), in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(isActive ? Color.cyan.opacity(0.35) : Color.clear, lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
         .help(label)
