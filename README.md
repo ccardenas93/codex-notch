@@ -31,7 +31,7 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 
 - Hover the compact notch to expand it.
 - Click the compact notch or the pin button to keep it open.
-- Drag the compact notch anywhere along the physical top edge; its position is remembered. A multi-notch fleet moves together.
+- Drag the thin grip along the notch's very top edge in either compact or expanded mode; its position is remembered. A multi-notch fleet moves together.
 - Type normal shell commands and press Return.
 - Press Tab in the terminal composer for path and executable completion.
 - While a command is running, type interactive input normally, press Control-C, or use the stop button to interrupt it.

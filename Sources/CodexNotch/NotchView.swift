@@ -6,6 +6,7 @@ struct NotchView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shakeCount: CGFloat = 0
     @State private var showBrainDeck = false
+    @State private var dragRailTranslation: CGFloat = 0
 
     var body: some View {
         ZStack {
@@ -27,6 +28,24 @@ struct NotchView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 18, style: .continuous))
         .contentShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 18, style: .continuous))
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(.clear)
+                .frame(height: 18)
+                .contentShape(Rectangle())
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 1, coordinateSpace: .global)
+                        .onChanged { value in
+                            let delta = value.translation.width - dragRailTranslation
+                            dragRailTranslation = value.translation.width
+                            model.moveFleet(by: delta)
+                        }
+                        .onEnded { _ in
+                            dragRailTranslation = 0
+                        }
+                )
+                .help("Drag to move the notch along the top edge")
+        }
         .modifier(ShakeEffect(shakes: shakeCount))
         .onChange(of: model.isExpanded) { _, expanded in
             NotificationCenter.default.post(

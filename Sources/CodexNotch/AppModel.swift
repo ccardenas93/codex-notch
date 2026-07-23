@@ -30,6 +30,7 @@ final class AppModel: ObservableObject {
 
     var onAddNotch: (() -> Void)?
     var onCloseNotch: (() -> Void)?
+    var onMoveFleet: ((CGFloat) -> Void)?
 
     private let server = CodexServer()
     private let terminal = TerminalSession()
@@ -353,6 +354,10 @@ final class AppModel: ObservableObject {
             return
         }
         onAddNotch?()
+    }
+
+    func moveFleet(by delta: CGFloat) {
+        onMoveFleet?(delta)
     }
 
     func requestCloseNotch() {

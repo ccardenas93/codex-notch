@@ -36,6 +36,9 @@ final class NotchFleetController {
             guard let model else { return }
             self?.removeNotch(model)
         }
+        model.onMoveFleet = { [weak self] delta in
+            self?.moveFleet(by: delta)
+        }
         let panel = NotchPanelController(model: model)
         panel.onCompactDrag = { [weak self] delta in
             self?.moveFleet(by: delta)
@@ -63,6 +66,7 @@ final class NotchFleetController {
 
         model.onAddNotch = nil
         model.onCloseNotch = nil
+        model.onMoveFleet = nil
         model.shutdown()
         panels[index].closePanel()
         models.remove(at: index)
