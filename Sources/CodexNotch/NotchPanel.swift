@@ -174,7 +174,9 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     private func position(size: NSSize, animated: Bool) {
         let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
-        let top = screen.visibleFrame.maxY - 7
+        // Anchor to the physical display edge so the compact notch lives mostly
+        // inside the menu-bar band instead of covering the top row of app tabs.
+        let top = screen.frame.maxY
         let origin = NSPoint(
             x: (horizontalCenter ?? screen.frame.midX) - size.width / 2,
             y: top - size.height

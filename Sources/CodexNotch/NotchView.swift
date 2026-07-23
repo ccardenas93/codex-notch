@@ -9,7 +9,11 @@ struct NotchView: View {
 
     var body: some View {
         ZStack {
-            NotchSurface(status: model.status, feedback: model.actionFeedback)
+            NotchSurface(
+                status: model.status,
+                feedback: model.actionFeedback,
+                isExpanded: model.isExpanded
+            )
 
             if model.isExpanded {
                 expandedContent
@@ -830,12 +834,16 @@ private enum EffortStyle {
 private struct NotchSurface: View {
     let status: NotchStatus
     let feedback: ActionFeedback?
+    let isExpanded: Bool
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let phase = timeline.date.timeIntervalSinceReferenceDate
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(red: 0.025, green: 0.026, blue: 0.031).opacity(0.985))
+                .fill(
+                    Color(red: 0.025, green: 0.026, blue: 0.031)
+                        .opacity(isExpanded ? 0.985 : 0.82)
+                )
                 .overlay {
                     RoundedRectangle(cornerRadius: 24, style: .continuous)
                         .fill(
