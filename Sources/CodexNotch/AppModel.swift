@@ -25,6 +25,7 @@ final class AppModel: ObservableObject {
     private var serverStarted = false
     private var hoverGeneration = 0
     private var pointerInside = false
+    private var panelFocused = false
     private let persistedThreadKey = "CodexNotch.threadID"
 
     var needsAttention: Bool { pendingInteraction != nil }
@@ -98,6 +99,7 @@ final class AppModel: ObservableObject {
                 guard let self,
                       self.hoverGeneration == generation,
                       !self.pointerInside,
+                      !self.panelFocused,
                       !self.isPinned else { return }
                 self.isExpanded = false
             }
@@ -117,8 +119,13 @@ final class AppModel: ObservableObject {
     func minimizeForFocusLoss() {
         hoverGeneration += 1
         pointerInside = false
+        panelFocused = false
         isPinned = false
         isExpanded = false
+    }
+
+    func panelDidBecomeKey() {
+        panelFocused = true
     }
 
     func sendComposer() {

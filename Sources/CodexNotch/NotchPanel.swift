@@ -123,6 +123,10 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         model.minimizeForFocusLoss()
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        model.panelDidBecomeKey()
+    }
+
     func setExpanded(_ expanded: Bool) {
         let size = expanded ? expandedSize : collapsedSize
         position(size: size, animated: true)
