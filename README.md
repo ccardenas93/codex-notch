@@ -39,10 +39,10 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 - Sending while a turn is active adds a visible queue item instead of losing or merging the instruction.
 - Hover a model card to read its full description in the animated ticker.
 - Use `+` from any notch to add another independent terminal/Codex workspace, up to six.
-- Use `−` to remove an idle notch. If it is running a command or Codex turn, confirm **Stop & close** first; the other workspaces are unaffected.
+- Use `−` to collapse a notch and `×` to close an idle notch. If it is running a command or Codex turn, confirm **Stop & close** first; the other workspaces are unaffected.
 - Use **New thread** for a clean conversation.
 - Clicking another app or window immediately collapses the panel back to the notch.
-- Use the × button to collapse. Right-click the notch and choose **Quit Codex Notch** to quit it manually; the installed keep-alive service will reopen it.
+- Right-click the notch and choose **Quit Codex Notch** to quit it manually; the installed keep-alive service will reopen it.
 
 ## Always running
 

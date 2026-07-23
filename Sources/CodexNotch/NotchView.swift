@@ -149,19 +149,19 @@ struct NotchView: View {
                 isDisabled: !model.canAddNotch,
                 action: model.addNotch
             )
-            if model.canCloseNotch {
-                HeaderButton(
-                    icon: "minus",
-                    label: "Close this notch",
-                    action: model.requestCloseNotch
-                )
-            }
+            HeaderButton(icon: "minus", label: "Collapse", action: model.collapse)
             HeaderButton(
                 icon: model.isPinned ? "pin.fill" : "pin",
                 label: model.isPinned ? "Unpin" : "Keep open",
                 action: model.togglePinned
             )
-            HeaderButton(icon: "xmark", label: "Collapse", action: model.collapse)
+            if model.canCloseNotch {
+                HeaderButton(
+                    icon: "xmark",
+                    label: "Close this notch",
+                    action: model.requestCloseNotch
+                )
+            }
         }
     }
 
