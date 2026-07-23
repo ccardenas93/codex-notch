@@ -11,8 +11,11 @@ final class FloatingNotchPanel: NSPanel {
 final class NotchTrackingHostingView: NSHostingView<NotchView> {
     var onHoverChange: ((Bool) -> Void)?
     var onCollapsedClick: (() -> Void)?
+    var onCompactDrag: ((CGFloat) -> Void)?
     var isExpanded: (() -> Bool)?
     private var pointerTrackingArea: NSTrackingArea?
+    private var compactMouseDownPoint: NSPoint?
+    private var didDragCompactNotch = false
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
@@ -43,15 +46,41 @@ final class NotchTrackingHostingView: NSHostingView<NotchView> {
 
     override func mouseDown(with event: NSEvent) {
         if isExpanded?() == false {
-            onCollapsedClick?()
+            compactMouseDownPoint = event.locationInWindow
+            didDragCompactNotch = false
             return
         }
         super.mouseDown(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard isExpanded?() == false, let start = compactMouseDownPoint else {
+            super.mouseDragged(with: event)
+            return
+        }
+        let point = event.locationInWindow
+        if abs(point.x - start.x) > 3 || didDragCompactNotch {
+            didDragCompactNotch = true
+            onCompactDrag?(event.deltaX)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        guard compactMouseDownPoint != nil else {
+            super.mouseUp(with: event)
+            return
+        }
+        compactMouseDownPoint = nil
+        if !didDragCompactNotch {
+            onCollapsedClick?()
+        }
+        didDragCompactNotch = false
     }
 }
 
 @MainActor
 final class NotchPanelController: NSObject, NSWindowDelegate {
+    var onCompactDrag: ((CGFloat) -> Void)?
     private let panel: FloatingNotchPanel
     private let hostingView: NotchTrackingHostingView
     private let model: AppModel
@@ -89,6 +118,7 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         }
         hostingView.isExpanded = { [weak model] in model?.isExpanded ?? false }
         hostingView.onCollapsedClick = { [weak model] in model?.togglePinned() }
+        hostingView.onCompactDrag = { [weak self] delta in self?.onCompactDrag?(delta) }
         panel.contentView = hostingView
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak panel, weak model] event in
             guard event.window === panel, let model else { return event }

@@ -6,6 +6,7 @@ final class NotchFleetController {
 
     private var models: [AppModel] = []
     private var panels: [NotchPanelController] = []
+    private var anchorFraction = UserDefaults.standard.object(forKey: "CodexNotch.horizontalAnchor") as? Double ?? 0.5
 
     func start() {
         guard models.isEmpty else { return }
@@ -36,6 +37,9 @@ final class NotchFleetController {
             self?.removeNotch(model)
         }
         let panel = NotchPanelController(model: model)
+        panel.onCompactDrag = { [weak self] delta in
+            self?.moveFleet(by: delta)
+        }
         models.append(model)
         panels.append(panel)
         updateFleetState()
@@ -83,10 +87,22 @@ final class NotchFleetController {
         }
 
         let fleetWidth = collapsedWidth + spacing * (count - 1)
-        let firstCenter = screen.frame.midX - fleetWidth / 2 + collapsedWidth / 2
+        let margin: CGFloat = 8
+        let minimumCenter = screen.frame.minX + fleetWidth / 2 + margin
+        let maximumCenter = screen.frame.maxX - fleetWidth / 2 - margin
+        let desiredCenter = screen.frame.minX + screen.frame.width * anchorFraction
+        let fleetCenter = min(max(desiredCenter, minimumCenter), maximumCenter)
+        let firstCenter = fleetCenter - fleetWidth / 2 + collapsedWidth / 2
 
         for (index, panel) in panels.enumerated() {
             panel.setHorizontalCenter(firstCenter + CGFloat(index) * spacing, animated: animated)
         }
+    }
+
+    private func moveFleet(by delta: CGFloat) {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first, screen.frame.width > 0 else { return }
+        anchorFraction = min(1, max(0, anchorFraction + Double(delta / screen.frame.width)))
+        UserDefaults.standard.set(anchorFraction, forKey: "CodexNotch.horizontalAnchor")
+        layout(animated: false)
     }
 }
