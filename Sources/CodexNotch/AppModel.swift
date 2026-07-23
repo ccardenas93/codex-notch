@@ -209,7 +209,8 @@ final class AppModel: ObservableObject {
     func handleTerminalTab() -> Bool {
         guard workspaceMode == .terminal, !terminalBusy else { return false }
         let text = composerText
-        let token = text.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+        let words = text.split(whereSeparator: \.isWhitespace)
+        let token = words.last.map(String.init) ?? ""
         guard !token.isEmpty else { return true }
 
         let expandedToken = (token as NSString).expandingTildeInPath
@@ -224,16 +225,34 @@ final class AppModel: ObservableObject {
             prefix = token
         }
 
-        var matches = completionNames(in: directory, prefix: prefix)
-        if !token.contains("/") {
-            matches += executableNames(prefix: prefix)
-            matches = Array(Set(matches)).sorted()
+        let includeExecutables = words.count == 1 && !token.contains("/")
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        activity = "Completing…"
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            var matches = Self.completionNames(in: directory, prefix: prefix)
+            if includeExecutables {
+                matches += Self.executableNames(prefix: prefix, path: path)
+                matches = Array(Set(matches)).sorted()
+            }
+            DispatchQueue.main.async {
+                guard let self, self.composerText == text else { return }
+                self.applyCompletion(
+                    matches: matches,
+                    text: text,
+                    token: token,
+                    prefix: prefix,
+                    directory: directory
+                )
+            }
         }
+        return true
+    }
+
+    private func applyCompletion(matches: [String], text: String, token: String, prefix: String, directory: String) {
         guard !matches.isEmpty else {
             activity = "No completion for \(token)"
-            return true
+            return
         }
-
         let common = longestCommonPrefix(matches)
         if common.count > prefix.count {
             let replacement: String
@@ -263,16 +282,14 @@ final class AppModel: ObservableObject {
             entries.append(ChatEntry(role: .terminalOutput, text: matches.prefix(24).joined(separator: "   ")))
             activity = "\(matches.count) completions"
         }
-        return true
     }
 
-    private func completionNames(in directory: String, prefix: String) -> [String] {
+    nonisolated private static func completionNames(in directory: String, prefix: String) -> [String] {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return [] }
         return names.filter { $0.hasPrefix(prefix) && (prefix.hasPrefix(".") || !$0.hasPrefix(".")) }.sorted()
     }
 
-    private func executableNames(prefix: String) -> [String] {
-        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+    nonisolated private static func executableNames(prefix: String, path: String) -> [String] {
         return path.split(separator: ":").flatMap { directory -> [String] in
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: String(directory)) else { return [] }
             return names.filter {
