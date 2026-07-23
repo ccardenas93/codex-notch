@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct NotchView: View {
@@ -115,31 +116,112 @@ struct NotchView: View {
     }
 
     private var transcript: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 12) {
-                    if model.entries.isEmpty {
-                        EmptyTranscript(mode: model.workspaceMode)
-                    } else {
-                        ForEach(model.entries) { entry in
-                            MessageRow(entry: entry)
-                                .id(entry.id)
-                        }
-                    }
+        Group {
+            if model.entries.isEmpty {
+                ScrollView {
+                    EmptyTranscript(mode: model.workspaceMode)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 4)
-            }
-            .scrollIndicators(.hidden)
-            .frame(maxHeight: model.pendingInteraction == nil ? .infinity : 170)
-            .onChange(of: model.entries) { _, entries in
-                guard let last = entries.last else { return }
-                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) {
-                    proxy.scrollTo(last.id, anchor: .bottom)
-                }
+                .scrollIndicators(.hidden)
+            } else {
+                SelectableTranscript(entries: model.entries)
             }
         }
+        .frame(maxHeight: model.pendingInteraction == nil ? .infinity : 170)
     }
+
+private struct SelectableTranscript: NSViewRepresentable {
+    let entries: [ChatEntry]
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 5)
+        textView.isRichText = true
+        textView.importsGraphics = false
+        textView.usesFindBar = true
+        textView.allowsUndo = false
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.setAccessibilityLabel("Terminal and Codex transcript")
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? NSTextView else { return }
+        let previousLength = textView.string.utf16.count
+        let selection = textView.selectedRange()
+        let shouldPreserveSelection = selection.length > 0
+        let rendered = Self.render(entries)
+
+        guard textView.textStorage?.isEqual(to: rendered) != true else { return }
+        textView.textStorage?.setAttributedString(rendered)
+
+        if shouldPreserveSelection, NSMaxRange(selection) <= rendered.length {
+            textView.setSelectedRange(selection)
+        } else if rendered.length > previousLength {
+            textView.scrollToEndOfDocument(nil)
+        }
+    }
+
+    private static func render(_ entries: [ChatEntry]) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = 2
+        paragraph.paragraphSpacing = 8
+        paragraph.lineBreakMode = .byWordWrapping
+
+        for entry in entries {
+            let label = label(for: entry.role)
+            let labelColor: NSColor = entry.role == .user || entry.role == .terminalCommand
+                ? NSColor.systemCyan.withAlphaComponent(0.82)
+                : NSColor.white.withAlphaComponent(0.34)
+            result.append(NSAttributedString(
+                string: "\(label)  ",
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 9, weight: .bold),
+                    .foregroundColor: labelColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+
+            let opacity: CGFloat
+            switch entry.role {
+            case .terminalOutput: opacity = 0.64
+            case .user: opacity = 0.74
+            default: opacity = 0.9
+            }
+            result.append(NSAttributedString(
+                string: entry.text + "\n",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 12.5, weight: .regular),
+                    .foregroundColor: NSColor.white.withAlphaComponent(opacity),
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+        }
+        return result
+    }
+
+    private static func label(for role: ChatEntry.Role) -> String {
+        switch role {
+        case .user: return "YOU"
+        case .assistant: return "CX"
+        case .system: return "•"
+        case .terminalCommand: return "$"
+        case .terminalOutput: return "›"
+        }
+    }
+}
 
     @ViewBuilder
     private func interactionView(_ interaction: PendingInteraction) -> some View {
