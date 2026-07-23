@@ -6,6 +6,7 @@ final class TerminalSession {
     var onOutput: ((String) -> Void)?
     var onCommandStarted: ((String) -> Void)?
     var onCommandFinished: ((Int32) -> Void)?
+    var onDirectoryChanged: ((String) -> Void)?
     var onTermination: ((String) -> Void)?
 
     private let queue = DispatchQueue(label: "com.carsk8.codex-notch.terminal")
@@ -59,7 +60,7 @@ final class TerminalSession {
         // Keep the PTY output clean while retaining a real interactive shell.
         sendInput(
             "stty -echo; unsetopt ZLE PROMPT_SP 2>/dev/null; " +
-            "PROMPT=$'\\n\(promptPrefix)%?\(promptSuffix)\\n'; RPROMPT=''\n"
+            "PROMPT=$'\\n\(promptPrefix)%?|%/\(promptSuffix)\\n'; RPROMPT=''\n"
         )
     }
 
@@ -175,13 +176,16 @@ final class TerminalSession {
             buffer.removeSubrange(...newline)
 
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let promptStatus = parsePromptStatus(trimmed) {
+            if let prompt = parsePrompt(trimmed) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onDirectoryChanged?(prompt.directory)
+                }
                 if waitingForStartup {
                     waitingForStartup = false
                 } else if currentCommand != nil {
                     currentCommand = nil
                     DispatchQueue.main.async { [weak self] in
-                        self?.onCommandFinished?(promptStatus)
+                        self?.onCommandFinished?(prompt.status)
                     }
                 }
                 continue
@@ -207,12 +211,16 @@ final class TerminalSession {
         DispatchQueue.main.async { [weak self] in self?.onOutput?(cleaned) }
     }
 
-    private func parsePromptStatus(_ line: String) -> Int32? {
+    private func parsePrompt(_ line: String) -> (status: Int32, directory: String)? {
         guard line.hasPrefix(promptPrefix), line.hasSuffix(promptSuffix) else { return nil }
         let start = line.index(line.startIndex, offsetBy: promptPrefix.count)
         let end = line.index(line.endIndex, offsetBy: -promptSuffix.count)
         guard start <= end else { return nil }
-        return Int32(line[start..<end])
+        let payload = line[start..<end]
+        guard let separator = payload.firstIndex(of: "|"),
+              let status = Int32(payload[..<separator]) else { return nil }
+        let directory = String(payload[payload.index(after: separator)...])
+        return (status, directory)
     }
 
     private func stripANSI(_ text: String) -> String {

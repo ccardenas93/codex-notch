@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     private var hoverGeneration = 0
     private var pointerInside = false
     private var panelFocused = false
+    private var terminalDirectory = FileManager.default.homeDirectoryForCurrentUser.path
     private let persistedThreadKey: String
     private let persistedModelKey: String
     private let persistedEffortKey: String
@@ -113,6 +114,9 @@ final class AppModel: ObservableObject {
             self?.terminalBusy = false
             self?.status = .terminal
             self?.activity = status == 0 ? "~  ·  ready" : "Command exited with status \(status)"
+        }
+        terminal.onDirectoryChanged = { [weak self] directory in
+            self?.terminalDirectory = directory
         }
         terminal.onTermination = { [weak self] reason in
             self?.terminalBusy = false
@@ -216,7 +220,7 @@ final class AppModel: ObservableObject {
             directory = tokenURL.deletingLastPathComponent().path
             prefix = tokenURL.lastPathComponent
         } else {
-            directory = FileManager.default.currentDirectoryPath
+            directory = terminalDirectory
             prefix = token
         }
 
