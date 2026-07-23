@@ -32,7 +32,8 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 - Hover the compact notch to expand it.
 - Click the compact notch or the pin button to keep it open.
 - Type normal shell commands and press Return.
-- While a command is running, type interactive input normally or use the stop button to send Ctrl-C.
+- Press Tab in the terminal composer for path and executable completion.
+- While a command is running, type interactive input normally, press Control-C, or use the stop button to interrupt it.
 - Type `codex` to enter Codex; type `/exit` to return to the terminal.
 - In Codex mode, use the brain button to choose the model and reasoning effort for the next turn.
 - Toggle **BUILD / PLAN** before a turn, watch the context ring, and press **STOP** (or Command-period) to interrupt active work.

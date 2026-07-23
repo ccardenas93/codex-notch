@@ -201,6 +201,93 @@ final class AppModel: ObservableObject {
         terminal.interrupt()
     }
 
+    @discardableResult
+    func handleTerminalTab() -> Bool {
+        guard workspaceMode == .terminal, !terminalBusy else { return false }
+        let text = composerText
+        let token = text.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
+        guard !token.isEmpty else { return true }
+
+        let expandedToken = (token as NSString).expandingTildeInPath
+        let tokenURL = URL(fileURLWithPath: expandedToken)
+        let directory: String
+        let prefix: String
+        if token.contains("/") {
+            directory = tokenURL.deletingLastPathComponent().path
+            prefix = tokenURL.lastPathComponent
+        } else {
+            directory = FileManager.default.currentDirectoryPath
+            prefix = token
+        }
+
+        var matches = completionNames(in: directory, prefix: prefix)
+        if !token.contains("/") {
+            matches += executableNames(prefix: prefix)
+            matches = Array(Set(matches)).sorted()
+        }
+        guard !matches.isEmpty else {
+            activity = "No completion for \(token)"
+            return true
+        }
+
+        let common = longestCommonPrefix(matches)
+        if common.count > prefix.count {
+            let replacement: String
+            if token.contains("/") {
+                let rawDirectory = (token as NSString).deletingLastPathComponent
+                replacement = rawDirectory.isEmpty ? common : rawDirectory + "/" + common
+            } else {
+                replacement = common
+            }
+            composerText = String(text.dropLast(token.count)) + replacement
+        }
+
+        if matches.count == 1 {
+            let candidatePath = URL(fileURLWithPath: directory).appendingPathComponent(matches[0]).path
+            if FileManager.default.fileExists(atPath: candidatePath, isDirectory: nil) {
+                var isDirectory: ObjCBool = false
+                if FileManager.default.fileExists(atPath: candidatePath, isDirectory: &isDirectory), isDirectory.boolValue {
+                    if !composerText.hasSuffix("/") { composerText += "/" }
+                } else {
+                    composerText += " "
+                }
+            } else {
+                composerText += " "
+            }
+            activity = "Completed"
+        } else {
+            entries.append(ChatEntry(role: .terminalOutput, text: matches.prefix(24).joined(separator: "   ")))
+            activity = "\(matches.count) completions"
+        }
+        return true
+    }
+
+    private func completionNames(in directory: String, prefix: String) -> [String] {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return [] }
+        return names.filter { $0.hasPrefix(prefix) && (prefix.hasPrefix(".") || !$0.hasPrefix(".")) }.sorted()
+    }
+
+    private func executableNames(prefix: String) -> [String] {
+        let path = ProcessInfo.processInfo.environment["PATH"] ?? "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+        return path.split(separator: ":").flatMap { directory -> [String] in
+            guard let names = try? FileManager.default.contentsOfDirectory(atPath: String(directory)) else { return [] }
+            return names.filter {
+                $0.hasPrefix(prefix) &&
+                    FileManager.default.isExecutableFile(
+                        atPath: URL(fileURLWithPath: String(directory)).appendingPathComponent($0).path
+                    )
+            }
+        }
+    }
+
+    private func longestCommonPrefix(_ values: [String]) -> String {
+        guard var prefix = values.first else { return "" }
+        for value in values.dropFirst() {
+            while !value.hasPrefix(prefix), !prefix.isEmpty { prefix.removeLast() }
+        }
+        return prefix
+    }
+
     func interruptCodexTurn() {
         guard let threadID, let turnID, !isStoppingTurn else { return }
         isStoppingTurn = true

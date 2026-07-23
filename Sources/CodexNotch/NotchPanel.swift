@@ -59,6 +59,7 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     private let expandedSize = NSSize(width: 620, height: 520)
     private var horizontalCenter: CGFloat?
     private var observers: [NSObjectProtocol] = []
+    private var keyMonitor: Any?
 
     init(model: AppModel) {
         self.model = model
@@ -89,6 +90,22 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         hostingView.isExpanded = { [weak model] in model?.isExpanded ?? false }
         hostingView.onCollapsedClick = { [weak model] in model?.togglePinned() }
         panel.contentView = hostingView
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak panel, weak model] event in
+            guard event.window === panel, let model else { return event }
+            if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .control,
+               event.charactersIgnoringModifiers?.lowercased() == "c",
+               model.workspaceMode == .terminal,
+               model.terminalBusy {
+                model.interruptTerminal()
+                return nil
+            }
+            if event.keyCode == 48,
+               event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty,
+               model.handleTerminalTab() {
+                return nil
+            }
+            return event
+        }
         position(size: collapsedSize, animated: false)
         panel.orderFrontRegardless()
 
@@ -141,6 +158,10 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     }
 
     func closePanel() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
