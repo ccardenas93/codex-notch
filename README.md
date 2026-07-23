@@ -1,0 +1,46 @@
+# Codex Notch
+
+A native, always-available terminal for macOS. It sits at the top center of a display as a compact faux notch, expands on hover, and enters Codex only after you type `codex`.
+
+## What works
+
+- Starts as a persistent PTY-backed `zsh` terminal with streaming output, interactive input, Ctrl-C interruption, and shell state such as `cd`.
+- Starts a local `codex app-server` only after you type `codex`, using your existing Codex login and configuration.
+- Keeps a thread between launches and offers a one-click fresh thread.
+- Accepts normal Codex prompts in the built-in composer.
+- Steers an active turn when you send another instruction while Codex is working.
+- Streams assistant text and live activity into the notch.
+- Renders `request_user_input` questions as option buttons plus a custom-answer field.
+- Handles command and file-change approvals with approve, session approval, and deny actions.
+- Uses an animated rainbow edge while working, yellow attention pulse, green approval flash, cyan choice flash, and red denial shake.
+- Respects the macOS Reduce Motion setting.
+
+## Build and open
+
+```sh
+./Scripts/build-app.sh
+open "Codex Notch.app"
+```
+
+The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local/bin/codex`, or the ChatGPT app bundle. It does not modify `~/.codex/config.toml`, so the existing Computer Use notification command remains intact.
+
+## Controls
+
+- Hover the compact notch to expand it.
+- Click the compact notch or the pin button to keep it open.
+- Type normal shell commands and press Return.
+- While a command is running, type interactive input normally or use the stop button to send Ctrl-C.
+- Type `codex` to enter Codex; type `/exit` to return to the terminal.
+- Use **New thread** for a clean conversation.
+- Clicking another app or window immediately collapses the panel back to the notch.
+- Use the × button to collapse. Right-click the notch and choose **Quit Codex Notch** to quit it manually; the installed keep-alive service will reopen it.
+
+## Always running
+
+The installed LaunchAgent is `~/Library/LaunchAgents/com.carsk8.codex-notch.plist`. It starts the notch at login and restarts it after a crash or manual quit. To disable it permanently:
+
+```sh
+launchctl bootout gui/$(id -u) ~/Library/LaunchAgents/com.carsk8.codex-notch.plist
+```
+
+Codex's `request_user_input` interface is currently marked experimental by the installed app-server schema, so its wire format may require small updates after a future Codex CLI upgrade.
