@@ -57,6 +57,7 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     private let model: AppModel
     private let collapsedSize = NSSize(width: 260, height: 44)
     private let expandedSize = NSSize(width: 620, height: 520)
+    private var horizontalCenter: CGFloat?
 
     init(model: AppModel) {
         self.model = model
@@ -92,10 +93,10 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
 
         NotificationCenter.default.addObserver(
             forName: .codexNotchExpansionChanged,
-            object: nil,
+            object: model,
             queue: .main
         ) { [weak self] notification in
-            guard let expanded = notification.object as? Bool else { return }
+            guard let expanded = notification.userInfo?["expanded"] as? Bool else { return }
             MainActor.assumeIsolated { self?.setExpanded(expanded) }
         }
 
@@ -133,12 +134,17 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         panel.orderFrontRegardless()
     }
 
+    func setHorizontalCenter(_ center: CGFloat, animated: Bool) {
+        horizontalCenter = center
+        position(size: panel.frame.size, animated: animated)
+    }
+
     private func position(size: NSSize, animated: Bool) {
         let screen = panel.screen ?? NSScreen.main ?? NSScreen.screens.first
         guard let screen else { return }
         let top = screen.visibleFrame.maxY - 7
         let origin = NSPoint(
-            x: screen.frame.midX - size.width / 2,
+            x: (horizontalCenter ?? screen.frame.midX) - size.width / 2,
             y: top - size.height
         )
         let frame = NSRect(origin: origin, size: size)

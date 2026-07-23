@@ -12,8 +12,7 @@ struct CodexNotchApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let model = AppModel()
-    private var panelController: NotchPanelController?
+    private var fleetController: NotchFleetController?
     private var smokeTerminal: TerminalSession?
     private var smokeServer: CodexServer?
     private var smokeStage = 0
@@ -32,15 +31,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         NSApplication.shared.setActivationPolicy(.accessory)
-        panelController = NotchPanelController(model: model)
-        model.start()
+        let fleet = NotchFleetController()
+        fleetController = fleet
+        fleet.start()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         smokeTerminal?.stop()
         smokeServer?.stop()
         if smokeTerminal == nil, smokeServer == nil {
-            model.shutdown()
+            fleetController?.shutdown()
         }
     }
 

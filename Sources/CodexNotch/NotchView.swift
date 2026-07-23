@@ -25,7 +25,11 @@ struct NotchView: View {
         .contentShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 18, style: .continuous))
         .modifier(ShakeEffect(shakes: shakeCount))
         .onChange(of: model.isExpanded) { _, expanded in
-            NotificationCenter.default.post(name: .codexNotchExpansionChanged, object: expanded)
+            NotificationCenter.default.post(
+                name: .codexNotchExpansionChanged,
+                object: model,
+                userInfo: ["expanded": expanded]
+            )
         }
         .onChange(of: model.feedbackNonce) { _, _ in
             guard model.actionFeedback == .denied, !reduceMotion else { return }
@@ -119,10 +123,17 @@ struct NotchView: View {
                     }
                 }
                 HeaderButton(icon: "terminal", label: "Return to terminal", action: model.returnToTerminal)
-                HeaderButton(icon: "plus", label: "New thread", action: model.newThread)
             } else if model.terminalBusy {
                 HeaderButton(icon: "stop.fill", label: "Interrupt command", action: model.interruptTerminal)
             }
+            HeaderButton(
+                icon: model.canAddNotch ? "plus" : "6.circle.fill",
+                label: model.canAddNotch
+                    ? "Add notch (\(model.notchCount)/6)"
+                    : "Maximum of six notches",
+                isDisabled: !model.canAddNotch,
+                action: model.addNotch
+            )
             HeaderButton(
                 icon: model.isPinned ? "pin.fill" : "pin",
                 label: model.isPinned ? "Unpin" : "Keep open",
@@ -294,6 +305,7 @@ private struct SelectableTranscript: NSViewRepresentable {
 
 private struct BrainDeck: View {
     @ObservedObject var model: AppModel
+    @State private var hoveredModelID: String?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -323,12 +335,28 @@ private struct BrainDeck: View {
                             ModelChip(
                                 option: option,
                                 selected: option.id == model.selectedModelID,
+                                onHover: { inside in
+                                    hoveredModelID = inside ? option.id : nil
+                                },
                                 action: { model.selectModel(option.id) }
                             )
                         }
                     }
                 }
                 .scrollIndicators(.hidden)
+
+                if let describedModel = model.availableModels.first(where: { $0.id == hoveredModelID })
+                    ?? model.selectedModel {
+                    HStack(spacing: 7) {
+                        Image(systemName: hoveredModelID == nil ? "info.circle" : "quote.bubble")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.cyan.opacity(0.62))
+                        MarqueeDescription(text: describedModel.description)
+                            .id(describedModel.id)
+                    }
+                    .frame(height: 18)
+                    .transition(.opacity)
+                }
 
                 HStack(spacing: 6) {
                     Text("FAST")
@@ -376,6 +404,7 @@ private struct BrainDeck: View {
 private struct ModelChip: View {
     let option: CodexModelOption
     let selected: Bool
+    let onHover: (Bool) -> Void
     let action: () -> Void
 
     var body: some View {
@@ -391,8 +420,8 @@ private struct ModelChip: View {
                             .frame(width: 4, height: 4)
                     }
                 }
-                Text(option.description)
-                    .font(.system(size: 8.5, design: .rounded))
+                Text(option.model)
+                    .font(.system(size: 8.5, design: .monospaced))
                     .foregroundStyle(.white.opacity(0.38))
                     .lineLimit(1)
             }
@@ -411,6 +440,45 @@ private struct ModelChip: View {
         }
         .buttonStyle(.plain)
         .help(option.description)
+        .onHover(perform: onHover)
+    }
+}
+
+private struct MarqueeDescription: View {
+    let text: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        GeometryReader { geometry in
+            if reduceMotion {
+                ScrollView(.horizontal) {
+                    descriptionText
+                }
+                .scrollIndicators(.hidden)
+            } else {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+                    let font = NSFont.systemFont(ofSize: 9.5, weight: .regular)
+                    let textWidth = (text as NSString).size(withAttributes: [.font: font]).width
+                    let overflow = max(0, textWidth - geometry.size.width)
+                    let duration = max(4.5, Double(overflow / 22) + 3.0)
+                    let phase = timeline.date.timeIntervalSinceReferenceDate
+                        .truncatingRemainder(dividingBy: duration) / duration
+                    let travel = overflow * (0.5 - 0.5 * cos(phase * .pi * 2))
+
+                    descriptionText
+                        .offset(x: -travel)
+                }
+            }
+        }
+        .clipped()
+        .accessibilityLabel(text)
+    }
+
+    private var descriptionText: some View {
+        Text(text)
+            .font(.system(size: 9.5, weight: .regular, design: .rounded))
+            .foregroundStyle(.white.opacity(0.48))
+            .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -837,13 +905,16 @@ private struct HeaderButton: View {
     let icon: String
     let label: String
     var isActive = false
+    var isDisabled = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(isActive ? Color.cyan : .white.opacity(0.54))
+                .foregroundStyle(
+                    isDisabled ? .white.opacity(0.2) : isActive ? Color.cyan : .white.opacity(0.54)
+                )
                 .frame(width: 28, height: 28)
                 .background(isActive ? Color.cyan.opacity(0.14) : .white.opacity(0.055), in: Circle())
                 .overlay {
@@ -852,6 +923,7 @@ private struct HeaderButton: View {
                 }
         }
         .buttonStyle(.plain)
+        .disabled(isDisabled)
         .help(label)
         .accessibilityLabel(label)
     }

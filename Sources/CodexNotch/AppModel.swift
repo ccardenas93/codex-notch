@@ -18,6 +18,10 @@ final class AppModel: ObservableObject {
     @Published var availableModels: [CodexModelOption] = []
     @Published var selectedModelID: String?
     @Published var selectedEffort: String?
+    @Published var canAddNotch = true
+    @Published var notchCount = 1
+
+    var onAddNotch: (() -> Void)?
 
     private let server = CodexServer()
     private let terminal = TerminalSession()
@@ -29,9 +33,16 @@ final class AppModel: ObservableObject {
     private var hoverGeneration = 0
     private var pointerInside = false
     private var panelFocused = false
-    private let persistedThreadKey = "CodexNotch.threadID"
-    private let persistedModelKey = "CodexNotch.model"
-    private let persistedEffortKey = "CodexNotch.effort"
+    private let persistedThreadKey: String
+    private let persistedModelKey: String
+    private let persistedEffortKey: String
+
+    init(slot: Int = 0) {
+        let suffix = slot == 0 ? "" : ".slot\(slot + 1)"
+        persistedThreadKey = "CodexNotch.threadID\(suffix)"
+        persistedModelKey = "CodexNotch.model\(suffix)"
+        persistedEffortKey = "CodexNotch.effort\(suffix)"
+    }
 
     var needsAttention: Bool { pendingInteraction != nil }
     var canSend: Bool {
@@ -162,6 +173,14 @@ final class AppModel: ObservableObject {
         guard workspaceMode == .terminal, terminalBusy else { return }
         activity = "Interrupting command"
         terminal.interrupt()
+    }
+
+    func addNotch() {
+        guard canAddNotch else {
+            activity = "Six notches is the maximum"
+            return
+        }
+        onAddNotch?()
     }
 
     func returnToTerminal() {
