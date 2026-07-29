@@ -15,6 +15,7 @@ final class TerminalSession {
     private var readSource: DispatchSourceRead?
     private var processSource: DispatchSourceProcess?
     private var buffer = ""
+    private var utf8Buffer = Data()
     private var currentCommand: String?
     private let promptPrefix = "__CODEX_NOTCH_PROMPT_"
     private let promptSuffix = "__"
@@ -166,13 +167,15 @@ final class TerminalSession {
     }
 
     private func consume(_ data: Data) {
-        let text = String(decoding: data, as: UTF8.self)
+        utf8Buffer.append(data)
+        guard let text = decodeAvailableUTF8() else { return }
+        let normalized = text
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
-        buffer += stripANSI(text)
+        buffer += normalized
 
         while let newline = buffer.firstIndex(of: "\n") {
-            let line = String(buffer[..<newline])
+            let line = stripANSI(String(buffer[..<newline]))
             buffer.removeSubrange(...newline)
 
             let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -201,6 +204,31 @@ final class TerminalSession {
                 emit(line)
             }
         }
+    }
+
+    private func decodeAvailableUTF8() -> String? {
+        if let complete = String(data: utf8Buffer, encoding: .utf8) {
+            utf8Buffer.removeAll(keepingCapacity: true)
+            return complete
+        }
+
+        // A PTY read can split a multi-byte scalar. Decode the valid prefix and
+        // retain at most the final three bytes for the next read.
+        for suffixLength in 1...min(3, utf8Buffer.count) {
+            let prefix = utf8Buffer.dropLast(suffixLength)
+            if let decoded = String(data: prefix, encoding: .utf8) {
+                utf8Buffer = Data(utf8Buffer.suffix(suffixLength))
+                return decoded
+            }
+        }
+
+        // Invalid terminal bytes should not block all future output forever.
+        if utf8Buffer.count > 65_536 {
+            let decoded = String(decoding: utf8Buffer, as: UTF8.self)
+            utf8Buffer.removeAll(keepingCapacity: true)
+            return decoded
+        }
+        return nil
     }
 
     private func emit(_ text: String) {

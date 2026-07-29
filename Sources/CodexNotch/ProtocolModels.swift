@@ -66,7 +66,8 @@ enum InteractionResponseStyle {
     case standardApproval
     case legacyApproval
     case permissions(requested: [String: Any])
-    case elicitation
+    case elicitation(url: String?)
+    case unsupported
     case questions
 }
 
@@ -75,6 +76,19 @@ struct PendingInteraction {
     let method: String
     let kind: PendingInteractionKind
     let responseStyle: InteractionResponseStyle
+
+    var allowsApproval: Bool {
+        switch responseStyle {
+        case .elicitation(let url): return url != nil
+        case .unsupported, .questions: return false
+        default: return true
+        }
+    }
+
+    var approvalLabel: String {
+        if case .elicitation(let url) = responseStyle, url != nil { return "Open & continue" }
+        return "Allow once"
+    }
 }
 
 enum NotchStatus: Equatable {
@@ -98,6 +112,13 @@ enum NotchStatus: Equatable {
         case .done: return "Done"
         case .failed: return "Connection issue"
         }
+    }
+}
+
+extension NotchStatus {
+    var isFailure: Bool {
+        if case .failed = self { return true }
+        return false
     }
 }
 

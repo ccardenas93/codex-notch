@@ -60,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "clientInfo": [
                         "name": "codex_notch_smoke_test",
                         "title": "Codex Notch Smoke Test",
-                        "version": "0.1.0",
+                        "version": "0.2.0",
                     ],
                     "capabilities": ["experimentalApi": true],
                 ]

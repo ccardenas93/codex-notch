@@ -3,6 +3,7 @@ import Foundation
 
 @MainActor
 final class AppModel: ObservableObject {
+    let slot: Int
     @Published var workspaceMode: WorkspaceMode = .terminal
     @Published var status: NotchStatus = .terminal
     @Published var activity = "~  ·  type codex to enter Codex"
@@ -15,6 +16,7 @@ final class AppModel: ObservableObject {
     @Published var actionFeedback: ActionFeedback?
     @Published var feedbackNonce = 0
     @Published var terminalBusy = false
+    @Published var terminalAvailable = false
     @Published var availableModels: [CodexModelOption] = []
     @Published var selectedModelID: String?
     @Published var selectedEffort: String?
@@ -31,9 +33,10 @@ final class AppModel: ObservableObject {
     var onAddNotch: (() -> Void)?
     var onCloseNotch: (() -> Void)?
     var onMoveFleet: ((CGFloat) -> Void)?
+    var onSetFleetAnchor: ((Double) -> Void)?
 
-    private let server = CodexServer()
-    private let terminal = TerminalSession()
+    private var server = CodexServer()
+    private var terminal = TerminalSession()
     private var threadID: String?
     private var turnID: String?
     private var queuedPrompt: String?
@@ -43,12 +46,15 @@ final class AppModel: ObservableObject {
     private var pointerInside = false
     private var panelFocused = false
     private var terminalDirectory = FileManager.default.homeDirectoryForCurrentUser.path
+    private var terminalEntries: [ChatEntry] = []
+    private var codexEntries: [ChatEntry] = []
     private let persistedThreadKey: String
     private let persistedModelKey: String
     private let persistedEffortKey: String
     private let persistedModeKey: String
 
     init(slot: Int = 0) {
+        self.slot = slot
         let suffix = slot == 0 ? "" : ".slot\(slot + 1)"
         persistedThreadKey = "CodexNotch.threadID\(suffix)"
         persistedModelKey = "CodexNotch.model\(suffix)"
@@ -61,7 +67,7 @@ final class AppModel: ObservableObject {
     var canSend: Bool {
         let hasText = !composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         switch workspaceMode {
-        case .terminal: return hasText
+        case .terminal: return hasText && terminalAvailable
         case .codex: return hasText && threadID != nil
         }
     }
@@ -83,6 +89,12 @@ final class AppModel: ObservableObject {
     }
 
     var hasActiveCodexTurn: Bool { turnID != nil }
+    var canRetryCodex: Bool {
+        workspaceMode == .codex && !serverStarted && status.isFailure
+    }
+    var canRetryTerminal: Bool {
+        workspaceMode == .terminal && !terminalAvailable && status.isFailure
+    }
 
     var contextRemainingFraction: Double? {
         guard let contextWindowTokens, contextWindowTokens > 0 else { return nil }
@@ -95,14 +107,12 @@ final class AppModel: ObservableObject {
     }
 
     func start() {
-        server.onEvent = { [weak self] event in self?.handle(event) }
-        server.onTermination = { [weak self] reason in
-            self?.serverStarted = false
-            guard self?.workspaceMode == .codex else { return }
-            self?.status = .failed(reason)
-            self?.activity = reason
-            self?.isExpanded = true
-        }
+        configureServerCallbacks()
+        configureTerminalCallbacks()
+        startTerminal()
+    }
+
+    private func configureTerminalCallbacks() {
         terminal.onCommandStarted = { [weak self] command in
             self?.terminalBusy = true
             self?.status = .terminalRunning
@@ -120,17 +130,42 @@ final class AppModel: ObservableObject {
             self?.terminalDirectory = directory
         }
         terminal.onTermination = { [weak self] reason in
-            self?.terminalBusy = false
-            self?.status = .failed(reason)
-            self?.activity = reason
+            guard let self else { return }
+            self.terminalBusy = false
+            self.terminalAvailable = false
+            guard self.workspaceMode == .terminal else { return }
+            self.status = .failed(reason)
+            self.activity = "Terminal stopped. Restart it to continue."
         }
+    }
 
+    private func startTerminal() {
         do {
             try terminal.start()
+            terminalAvailable = true
+            status = .terminal
+            activity = "~  ·  type codex to enter Codex"
         } catch {
+            terminalAvailable = false
             status = .failed(error.localizedDescription)
             activity = error.localizedDescription
             isExpanded = true
+        }
+    }
+
+    private func configureServerCallbacks() {
+        server.onEvent = { [weak self] event in self?.handle(event) }
+        server.onTermination = { [weak self] reason in
+            guard let self else { return }
+            self.serverStarted = false
+            self.didInitialize = false
+            self.turnID = nil
+            self.isStoppingTurn = false
+            self.pendingInteraction = nil
+            guard self.workspaceMode == .codex else { return }
+            self.status = .failed(reason)
+            self.activity = "Codex stopped. Retry to reconnect."
+            self.isExpanded = true
         }
     }
 
@@ -215,7 +250,10 @@ final class AppModel: ObservableObject {
         guard !token.isEmpty else { return true }
 
         let expandedToken = (token as NSString).expandingTildeInPath
-        let tokenURL = URL(fileURLWithPath: expandedToken)
+        let absoluteToken = expandedToken.hasPrefix("/")
+            ? expandedToken
+            : URL(fileURLWithPath: terminalDirectory).appendingPathComponent(expandedToken).path
+        let tokenURL = URL(fileURLWithPath: absoluteToken)
         let directory: String
         let prefix: String
         if token.contains("/") {
@@ -263,7 +301,7 @@ final class AppModel: ObservableObject {
             } else {
                 replacement = common
             }
-            composerText = String(text.dropLast(token.count)) + replacement
+            composerText = String(text.dropLast(token.count)) + shellEscapedCompletion(replacement)
         }
 
         if matches.count == 1 {
@@ -310,6 +348,14 @@ final class AppModel: ObservableObject {
         return prefix
     }
 
+    private func shellEscapedCompletion(_ value: String) -> String {
+        let escapable = CharacterSet(charactersIn: " \\()[]{}&;!$'\"`|<>?*")
+        return value.unicodeScalars.reduce(into: "") { result, scalar in
+            if escapable.contains(scalar) { result.append("\\") }
+            result.unicodeScalars.append(scalar)
+        }
+    }
+
     func interruptCodexTurn() {
         guard let threadID, let turnID, !isStoppingTurn else { return }
         isStoppingTurn = true
@@ -324,6 +370,18 @@ final class AppModel: ObservableObject {
                 self?.activity = error.localizedDescription
             }
         }
+    }
+
+    func retryCodex() {
+        guard canRetryCodex else { return }
+        enterCodex(initialPrompt: nil)
+    }
+
+    func retryTerminal() {
+        guard canRetryTerminal else { return }
+        terminal = TerminalSession()
+        configureTerminalCallbacks()
+        startTerminal()
     }
 
     func setCollaborationMode(_ mode: String) {
@@ -360,6 +418,10 @@ final class AppModel: ObservableObject {
         onMoveFleet?(delta)
     }
 
+    func setFleetAnchor(_ fraction: Double) {
+        onSetFleetAnchor?(fraction)
+    }
+
     func requestCloseNotch() {
         guard canCloseNotch else { return }
         if terminalBusy || turnID != nil {
@@ -385,9 +447,11 @@ final class AppModel: ObservableObject {
             activity = "Wait for the Codex turn to finish before exiting"
             return
         }
+        codexEntries = entries
         workspaceMode = .terminal
-        status = .terminal
-        activity = "~  ·  type codex to return"
+        entries = terminalEntries
+        status = terminalAvailable ? .terminal : .failed("The terminal is not running.")
+        activity = terminalAvailable ? "~  ·  type codex to enter Codex" : "Terminal stopped. Restart it to continue."
         pendingInteraction = nil
         selectedAnswers.removeAll()
     }
@@ -412,7 +476,7 @@ final class AppModel: ObservableObject {
         var params: [String: Any] = [
             "threadId": threadID,
             "input": [["type": "text", "text": text]],
-            "cwd": FileManager.default.homeDirectoryForCurrentUser.path,
+            "cwd": terminalDirectory,
         ]
         if let selectedModel {
             params["model"] = selectedModel.model
@@ -468,12 +532,27 @@ final class AppModel: ObservableObject {
                 "permissions": decision == "decline" ? [:] : requested,
                 "scope": decision == "acceptForSession" ? "session" : "turn",
             ]
-        case .elicitation:
-            result = ["action": decision == "decline" ? "decline" : "accept"]
+        case .elicitation(let url):
+            guard decision == "decline" || url != nil else { return }
+            if decision != "decline", let url, let destination = URL(string: url) {
+                NSWorkspace.shared.open(destination)
+            }
+            result = ["action": decision == "decline" ? "decline" : "accept", "content": NSNull()]
+        case .unsupported:
+            server.respondError(
+                id: interaction.requestID,
+                message: "Codex Notch does not support the server request \(interaction.method)."
+            )
+            finishInteraction(decision: "decline")
+            return
         case .questions:
             return
         }
         server.respond(id: interaction.requestID, result: result)
+        finishInteraction(decision: decision)
+    }
+
+    private func finishInteraction(decision: String) {
         triggerFeedback(decision == "decline" ? .denied : .approved)
         pendingInteraction = nil
         status = .working
@@ -487,6 +566,7 @@ final class AppModel: ObservableObject {
         UserDefaults.standard.removeObject(forKey: persistedThreadKey)
         threadID = nil
         entries.removeAll()
+        codexEntries.removeAll()
         pendingInteraction = nil
         selectedAnswers.removeAll()
         status = .connecting
@@ -552,10 +632,14 @@ final class AppModel: ObservableObject {
     }
 
     private func enterCodex(initialPrompt: String?) {
+        terminalEntries = entries
         workspaceMode = .codex
+        entries = codexEntries
         status = .connecting
         activity = "Starting Codex"
-        entries.append(ChatEntry(role: .system, text: "Entering Codex. Type /exit to return to the terminal."))
+        if entries.isEmpty {
+            entries.append(ChatEntry(role: .system, text: "Codex is ready. Type /exit to return to the terminal."))
+        }
         queuedPrompt = initialPrompt
 
         if serverStarted {
@@ -573,6 +657,8 @@ final class AppModel: ObservableObject {
         }
 
         do {
+            server = CodexServer()
+            configureServerCallbacks()
             try server.start()
             serverStarted = true
             initialize()
@@ -590,7 +676,7 @@ final class AppModel: ObservableObject {
                 "clientInfo": [
                     "name": "codex_notch",
                     "title": "Codex Notch",
-                    "version": "0.1.0",
+                    "version": "0.2.0",
                 ],
                 "capabilities": ["experimentalApi": true],
             ]
@@ -663,7 +749,10 @@ final class AppModel: ObservableObject {
 
     private func restoreOrCreateThread() {
         if let saved = UserDefaults.standard.string(forKey: persistedThreadKey), !saved.isEmpty {
-            server.request(method: "thread/resume", params: ["threadId": saved]) { [weak self] result in
+            server.request(
+                method: "thread/resume",
+                params: ["threadId": saved, "cwd": terminalDirectory]
+            ) { [weak self] result in
                 switch result {
                 case .success(let payload): self?.acceptThread(from: payload, fallback: saved)
                 case .failure: self?.startNewThread()
@@ -678,7 +767,7 @@ final class AppModel: ObservableObject {
         guard didInitialize else { return }
         server.request(
             method: "thread/start",
-            params: ["cwd": FileManager.default.homeDirectoryForCurrentUser.path]
+            params: ["cwd": terminalDirectory]
         ) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -799,6 +888,12 @@ final class AppModel: ObservableObject {
         switch method {
         case "item/tool/requestUserInput":
             let questions = ProtocolParser.questions(from: params)
+            guard !questions.isEmpty else {
+                server.respondError(id: id, code: -32602, message: "Codex sent an empty question request.")
+                status = .working
+                activity = "Skipped an empty question"
+                return
+            }
             pendingInteraction = PendingInteraction(
                 requestID: id,
                 method: method,
@@ -880,11 +975,20 @@ final class AppModel: ObservableObject {
         case "mcpServer/elicitation/request":
             let serverName = params["serverName"] as? String ?? "Connected tool"
             let message = params["message"] as? String ?? "A connected tool needs your confirmation."
+            let mode = params["mode"] as? String ?? "form"
+            let url = mode == "url" ? params["url"] as? String : nil
+            let canAccept = url != nil
             pendingInteraction = PendingInteraction(
                 requestID: id,
                 method: method,
-                kind: .approval(title: "\(serverName) is asking", detail: message, allowsSessionApproval: false),
-                responseStyle: .elicitation
+                kind: .approval(
+                    title: canAccept ? "Open request from \(serverName)?" : "\(serverName) needs structured input",
+                    detail: canAccept
+                        ? message
+                        : "\(message) This form cannot be completed safely here yet; decline it so Codex can continue.",
+                    allowsSessionApproval: false
+                ),
+                responseStyle: .elicitation(url: url)
             )
             presentInteraction("Connected tool needs input")
 
@@ -894,10 +998,10 @@ final class AppModel: ObservableObject {
                 method: method,
                 kind: .approval(
                     title: "Codex needs confirmation",
-                    detail: "Request: \(method)\nThis request type is newer than Codex Notch. Accept only if you recognize it.",
+                    detail: "Request: \(method)\nThis version cannot handle the request safely. Dismiss it so Codex can continue.",
                     allowsSessionApproval: false
                 ),
-                responseStyle: .standardApproval
+                responseStyle: .unsupported
             )
             presentInteraction("Confirmation needed")
         }

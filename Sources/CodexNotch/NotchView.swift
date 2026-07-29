@@ -65,6 +65,11 @@ struct NotchView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Codex Notch")
         .contextMenu {
+            Menu("Position") {
+                Button("Left") { model.setFleetAnchor(0) }
+                Button("Center") { model.setFleetAnchor(0.5) }
+                Button("Right") { model.setFleetAnchor(1) }
+            }
             if model.workspaceMode == .codex {
                 Button("Return to terminal", action: model.returnToTerminal)
                 Button("New Codex thread", action: model.newThread)
@@ -124,6 +129,20 @@ struct NotchView: View {
                 )
             } else if let interaction = model.pendingInteraction {
                 interactionView(interaction)
+            } else if model.canRetryCodex {
+                RecoveryCard(
+                    title: "Codex disconnected",
+                    detail: "Reconnect to keep working in this thread.",
+                    buttonTitle: "Reconnect",
+                    retry: model.retryCodex
+                )
+            } else if model.canRetryTerminal {
+                RecoveryCard(
+                    title: "Terminal stopped",
+                    detail: "Start a fresh shell to keep working.",
+                    buttonTitle: "Restart terminal",
+                    retry: model.retryTerminal
+                )
             }
             composer
         }
@@ -309,6 +328,8 @@ private struct SelectableTranscript: NSViewRepresentable {
             ApprovalCard(
                 title: title,
                 detail: detail,
+                allowsApproval: interaction.allowsApproval,
+                approvalLabel: interaction.approvalLabel,
                 allowsSessionApproval: allowsSessionApproval,
                 approve: { model.answerApproval("accept") },
                 approveSession: { model.answerApproval("acceptForSession") },
@@ -332,6 +353,7 @@ private struct SelectableTranscript: NSViewRepresentable {
                         .stroke(.white.opacity(0.09), lineWidth: 1)
                 }
                 .onSubmit(model.sendComposer)
+                .accessibilityLabel(model.workspaceMode == .terminal ? "Terminal command" : "Message to Codex")
 
             Button(action: model.sendComposer) {
                 Image(systemName: model.hasActiveCodexTurn ? "text.badge.plus" : "arrow.up")
@@ -343,8 +365,13 @@ private struct SelectableTranscript: NSViewRepresentable {
             .buttonStyle(.plain)
             .disabled(!model.canSend)
             .keyboardShortcut(.return, modifiers: .command)
-            .accessibilityLabel(model.hasActiveCodexTurn ? "Queue for Codex" : "Send to Codex")
+            .accessibilityLabel(composerActionLabel)
         }
+    }
+
+    private var composerActionLabel: String {
+        if model.workspaceMode == .terminal { return "Run terminal command" }
+        return model.hasActiveCodexTurn ? "Queue message for Codex" : "Send message to Codex"
     }
 }
 
@@ -360,7 +387,7 @@ private struct CodexControlStrip: View {
                     Image(systemName: model.collaborationMode == "plan" ? "map.fill" : "hammer.fill")
                         .font(.system(size: 8.5, weight: .bold))
                     Text(model.collaborationMode == "plan" ? "PLAN" : "BUILD")
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                         .tracking(0.7)
                 }
                 .foregroundStyle(model.collaborationMode == "plan" ? Color.purple : Color.cyan)
@@ -387,9 +414,9 @@ private struct CodexControlStrip: View {
 
             HStack(spacing: 4) {
                 Image(systemName: "text.line.first.and.arrowtriangle.forward")
-                    .font(.system(size: 8))
+                    .font(.system(size: 9.5))
                 Text("Q \(model.queuedMessages.count)")
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
             }
             .foregroundStyle(model.queuedMessages.isEmpty ? .white.opacity(0.28) : .yellow.opacity(0.8))
             .padding(.horizontal, 8)
@@ -399,7 +426,7 @@ private struct CodexControlStrip: View {
             Spacer()
 
             Text(model.modelSelectionSummary.uppercased())
-                .font(.system(size: 7.5, weight: .medium, design: .monospaced))
+                .font(.system(size: 9, weight: .medium, design: .monospaced))
                 .foregroundStyle(.white.opacity(0.28))
                 .lineLimit(1)
 
@@ -407,9 +434,9 @@ private struct CodexControlStrip: View {
                 Button(action: model.interruptCodexTurn) {
                     HStack(spacing: 5) {
                         Image(systemName: "stop.fill")
-                            .font(.system(size: 7.5))
+                            .font(.system(size: 9))
                         Text(model.isStoppingTurn ? "STOPPING" : "STOP")
-                            .font(.system(size: 8, weight: .bold, design: .monospaced))
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
                     }
                     .foregroundStyle(.red)
                     .padding(.horizontal, 9)
@@ -443,7 +470,7 @@ private struct ContextMeter: View {
             }
             .frame(width: 13, height: 13)
             Text(label)
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
         }
         .foregroundStyle(.white.opacity(0.5))
         .padding(.horizontal, 8)
@@ -490,6 +517,7 @@ private struct MessageQueueStrip: View {
                                     .foregroundStyle(.white.opacity(0.3))
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Remove queued message \(index + 1)")
                         }
                         .padding(.horizontal, 8)
                         .frame(height: 24)
@@ -509,6 +537,7 @@ private struct MessageQueueStrip: View {
                 }
                 .buttonStyle(.plain)
                 .help("Run next queued message")
+                .accessibilityLabel("Run next queued message")
             }
 
             Button(action: model.clearQueuedMessages) {
@@ -519,6 +548,7 @@ private struct MessageQueueStrip: View {
             }
             .buttonStyle(.plain)
             .help("Clear queue")
+            .accessibilityLabel("Clear queued messages")
         }
         .frame(height: 26)
     }
@@ -537,7 +567,7 @@ private struct CloseNotchCard: View {
                 Text("Stop this workspace?")
                     .font(.system(size: 12.5, weight: .semibold, design: .rounded))
                     .foregroundStyle(.white)
-                Text("Its running command or Codex turn will be terminated. Other notches stay open.")
+                Text("This stops the running command or Codex turn. Other notches stay open.")
                     .font(.system(size: 10.5, design: .rounded))
                     .foregroundStyle(.white.opacity(0.48))
                     .fixedSize(horizontal: false, vertical: true)
@@ -551,6 +581,36 @@ private struct CloseNotchCard: View {
         .overlay {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.red.opacity(0.28), lineWidth: 1)
+        }
+    }
+}
+
+private struct RecoveryCard: View {
+    let title: String
+    let detail: String
+    let buttonTitle: String
+    let retry: () -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "arrow.clockwise.circle.fill")
+                .font(.system(size: 20))
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                Text(detail)
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            Spacer()
+            ActionButton(title: buttonTitle, tint: .white, action: retry)
+        }
+        .padding(13)
+        .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.orange.opacity(0.28), lineWidth: 1)
         }
     }
 }
@@ -774,10 +834,11 @@ private struct EffortChip: View {
 
 private struct BrainOrb: View {
     let effort: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate
+            let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 Circle()
                     .fill(EffortStyle.color(for: effort).opacity(0.12))
@@ -797,6 +858,7 @@ private struct BrainOrb: View {
                     .foregroundStyle(EffortStyle.color(for: effort))
             }
         }
+        .accessibilityHidden(true)
     }
 }
 
@@ -854,10 +916,11 @@ private struct NotchSurface: View {
     let status: NotchStatus
     let feedback: ActionFeedback?
     let isExpanded: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate
+            let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(
                     Color(red: 0.025, green: 0.026, blue: 0.031)
@@ -916,10 +979,11 @@ private struct NotchSurface: View {
 
 private struct StatusGlyph: View {
     let status: NotchStatus
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 24.0)) { timeline in
-            let phase = timeline.date.timeIntervalSinceReferenceDate
+            let phase = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate
             ZStack {
                 Circle().fill(baseColor.opacity(0.12))
                 if status == .working || status == .connecting || status == .terminalRunning {
@@ -940,6 +1004,7 @@ private struct StatusGlyph: View {
                 }
             }
         }
+        .accessibilityHidden(true)
     }
 
     private var baseColor: Color {
@@ -1075,6 +1140,7 @@ private struct QuestionCard: View {
                         .textFieldStyle(.plain)
                         .font(.system(size: 11.5, design: .rounded))
                         .onSubmit { model.submitCustomAnswer(questionID: question.id, text: customText) }
+                        .accessibilityLabel("Custom answer for \(question.header)")
                     Button("Send") {
                         model.submitCustomAnswer(questionID: question.id, text: customText)
                     }
@@ -1102,6 +1168,8 @@ private struct QuestionCard: View {
 private struct ApprovalCard: View {
     let title: String
     let detail: String
+    let allowsApproval: Bool
+    let approvalLabel: String
     let allowsSessionApproval: Bool
     let approve: () -> Void
     let approveSession: () -> Void
@@ -1122,11 +1190,13 @@ private struct ApprovalCard: View {
                 .lineLimit(4)
 
             HStack(spacing: 8) {
-                ActionButton(title: "Approve", tint: .green, action: approve)
-                if allowsSessionApproval {
-                    ActionButton(title: "Always this session", tint: .white, action: approveSession)
+                if allowsApproval {
+                    ActionButton(title: approvalLabel, tint: .green, action: approve)
+                    if allowsSessionApproval {
+                        ActionButton(title: "Allow for session", tint: .white, action: approveSession)
+                    }
                 }
-                ActionButton(title: "Deny", tint: .red, action: deny)
+                ActionButton(title: allowsApproval ? "Decline" : "Dismiss request", tint: .red, action: deny)
             }
         }
         .padding(13)

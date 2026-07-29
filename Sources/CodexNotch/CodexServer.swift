@@ -56,10 +56,17 @@ final class CodexServer {
             guard let self else { return }
             self.outputPipe.fileHandleForReading.readabilityHandler = nil
             self.errorPipe.fileHandleForReading.readabilityHandler = nil
-            let details = self.queue.sync { String(data: self.errorBuffer, encoding: .utf8) ?? "" }
+            let (details, pendingCallbacks) = self.queue.sync {
+                let details = String(data: self.errorBuffer, encoding: .utf8) ?? ""
+                let pending = Array(self.callbacks.values)
+                self.callbacks.removeAll()
+                return (details, pending)
+            }
             DispatchQueue.main.async {
                 let suffix = details.trimmingCharacters(in: .whitespacesAndNewlines)
-                self.onTermination?(suffix.isEmpty ? "Codex stopped with code \(process.terminationStatus)." : suffix)
+                let message = suffix.isEmpty ? "Codex stopped with code \(process.terminationStatus)." : suffix
+                pendingCallbacks.forEach { $0(.failure(ServerError.rpc(message))) }
+                self.onTermination?(message)
             }
         }
         try process.run()
@@ -92,6 +99,10 @@ final class CodexServer {
 
     func respond(id: Any, result: [String: Any]) {
         send(["id": id, "result": result])
+    }
+
+    func respondError(id: Any, code: Int = -32601, message: String) {
+        send(["id": id, "error": ["code": code, "message": message]])
     }
 
     private func send(_ object: [String: Any]) {

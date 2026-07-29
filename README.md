@@ -5,6 +5,7 @@ A native, always-available terminal for macOS. It sits at the top center of a di
 ## What works
 
 - Starts as a persistent PTY-backed `zsh` terminal with streaming output, interactive input, Ctrl-C interruption, and shell state such as `cd`.
+- Keeps terminal and Codex transcripts separate, while using the terminal's live directory for Codex threads and turns.
 - Starts a local `codex app-server` only after you type `codex`, using your existing Codex login and configuration.
 - Keeps a thread between launches and offers a one-click fresh thread.
 - Includes a playful Brain Deck that discovers the live Codex model catalog, explains effort as a fast-to-deep spectrum, and remembers the choice.
@@ -15,6 +16,7 @@ A native, always-available terminal for macOS. It sits at the top center of a di
 - Streams assistant text and live activity into the notch.
 - Renders `request_user_input` questions as option buttons plus a custom-answer field.
 - Handles current and legacy command/file approvals, extra-permission requests, and connected-tool confirmations with explicit accept, session approval, and reject actions.
+- Recovers from a stopped shell or Codex service with an in-panel restart action.
 - Uses an animated rainbow edge while working, yellow attention pulse, green approval flash, cyan choice flash, and red denial shake.
 - Respects the macOS Reduce Motion setting.
 
@@ -32,6 +34,7 @@ The app uses the installed Codex CLI from `/opt/homebrew/bin/codex`, `/usr/local
 - Hover the compact notch to expand it.
 - Click the compact notch or the pin button to keep it open.
 - Drag the thin grip along the notch's very top edge in either compact or expanded mode; its position is remembered. A multi-notch fleet moves together.
+- Right-click and use **Position** to move the fleet left, center, or right without dragging.
 - Type normal shell commands and press Return.
 - Press Tab in the terminal composer for path and executable completion.
 - While a command is running, type interactive input normally, press Control-C, or use the stop button to interrupt it.

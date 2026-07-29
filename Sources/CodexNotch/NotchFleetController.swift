@@ -28,7 +28,9 @@ final class NotchFleetController {
     private func addNotch(animated: Bool = true) {
         guard models.count < Self.maximumNotches else { return }
 
-        let model = AppModel(slot: models.count)
+        let usedSlots = Set(models.map(\.slot))
+        guard let slot = (0..<Self.maximumNotches).first(where: { !usedSlots.contains($0) }) else { return }
+        let model = AppModel(slot: slot)
         model.onAddNotch = { [weak self] in
             self?.addNotch()
         }
@@ -38,6 +40,9 @@ final class NotchFleetController {
         }
         model.onMoveFleet = { [weak self] delta in
             self?.moveFleet(by: delta)
+        }
+        model.onSetFleetAnchor = { [weak self] fraction in
+            self?.setFleetAnchor(fraction)
         }
         let panel = NotchPanelController(model: model)
         panel.onCompactDrag = { [weak self] delta in
@@ -67,6 +72,7 @@ final class NotchFleetController {
         model.onAddNotch = nil
         model.onCloseNotch = nil
         model.onMoveFleet = nil
+        model.onSetFleetAnchor = nil
         model.shutdown()
         panels[index].closePanel()
         models.remove(at: index)
@@ -108,5 +114,11 @@ final class NotchFleetController {
         anchorFraction = min(1, max(0, anchorFraction + Double(delta / screen.frame.width)))
         UserDefaults.standard.set(anchorFraction, forKey: "CodexNotch.horizontalAnchor")
         layout(animated: false)
+    }
+
+    private func setFleetAnchor(_ fraction: Double) {
+        anchorFraction = min(1, max(0, fraction))
+        UserDefaults.standard.set(anchorFraction, forKey: "CodexNotch.horizontalAnchor")
+        layout(animated: true)
     }
 }

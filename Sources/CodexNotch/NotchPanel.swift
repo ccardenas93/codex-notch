@@ -207,8 +207,14 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
         // Anchor to the physical display edge so the compact notch lives mostly
         // inside the menu-bar band instead of covering the top row of app tabs.
         let top = screen.frame.maxY
+        let halfWidth = size.width / 2
+        let desiredCenter = horizontalCenter ?? screen.frame.midX
+        let clampedCenter = min(
+            max(desiredCenter, screen.frame.minX + halfWidth + 8),
+            screen.frame.maxX - halfWidth - 8
+        )
         let origin = NSPoint(
-            x: (horizontalCenter ?? screen.frame.midX) - size.width / 2,
+            x: clampedCenter - halfWidth,
             y: top - size.height
         )
         let frame = NSRect(origin: origin, size: size)
