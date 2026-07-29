@@ -84,17 +84,24 @@ final class NotchPanelController: NSObject, NSWindowDelegate {
     private let panel: FloatingNotchPanel
     private let hostingView: NotchTrackingHostingView
     private let model: AppModel
-    private let collapsedSize = NSSize(width: 260, height: 44)
+    private var collapsedSize: NSSize {
+        Self.collapsedSize(for: panel.screen ?? NSScreen.main ?? NSScreen.screens.first)
+    }
+    private static func collapsedSize(for screen: NSScreen?) -> NSSize {
+        let menuBarHeight = screen.map { $0.frame.maxY - $0.visibleFrame.maxY } ?? 28
+        return NSSize(width: 260, height: min(32, max(24, menuBarHeight)))
+    }
     private let expandedSize = NSSize(width: 620, height: 520)
     private var horizontalCenter: CGFloat?
     private var observers: [NSObjectProtocol] = []
     private var keyMonitor: Any?
 
     init(model: AppModel) {
+        let initialCollapsedSize = Self.collapsedSize(for: NSScreen.main ?? NSScreen.screens.first)
         self.model = model
         hostingView = NotchTrackingHostingView(rootView: NotchView(model: model))
         panel = FloatingNotchPanel(
-            contentRect: NSRect(origin: .zero, size: collapsedSize),
+            contentRect: NSRect(origin: .zero, size: initialCollapsedSize),
             styleMask: [.borderless],
             backing: .buffered,
             defer: false

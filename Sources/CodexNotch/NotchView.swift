@@ -26,8 +26,8 @@ struct NotchView: View {
                     .transition(.opacity)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 18, style: .continuous))
-        .contentShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 13, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: model.isExpanded ? 24 : 13, style: .continuous))
         .overlay(alignment: .top) {
             Rectangle()
                 .fill(.clear)
@@ -83,20 +83,23 @@ struct NotchView: View {
     }
 
     private var collapsedContent: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 7) {
             StatusGlyph(status: model.status)
-                .frame(width: 22, height: 22)
+                .frame(width: 18, height: 18)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text(model.status.title)
-                    .font(.system(size: 12.5, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                Text(model.activity)
-                    .font(.system(size: 9.5, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.48))
-                    .lineLimit(1)
-            }
+            Text(model.status.title)
+                .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white)
+                .lineLimit(1)
+
+            Circle()
+                .fill(.white.opacity(0.28))
+                .frame(width: 3, height: 3)
+
+            Text(model.activity)
+                .font(.system(size: 9.5, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(0.58))
+                .lineLimit(1)
 
             Spacer(minLength: 2)
 
