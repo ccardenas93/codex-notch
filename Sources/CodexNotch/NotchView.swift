@@ -340,7 +340,11 @@ private struct SelectableTranscript: NSViewRepresentable {
 
     private var composer: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField(model.composerPlaceholder, text: $model.composerText, axis: .vertical)
+            TextField(
+                "",
+                text: $model.composerText,
+                axis: .vertical
+            )
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .regular, design: .rounded))
                 .foregroundStyle(.white)
@@ -351,6 +355,17 @@ private struct SelectableTranscript: NSViewRepresentable {
                 .overlay {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(.white.opacity(0.09), lineWidth: 1)
+                }
+                .overlay(alignment: .leading) {
+                    if model.composerText.isEmpty {
+                        Text(model.composerPlaceholder)
+                            .font(.system(size: 13, weight: .regular, design: .rounded))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .lineLimit(1)
+                            .padding(.horizontal, 13)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
                 }
                 .onSubmit(model.sendComposer)
                 .accessibilityLabel(model.workspaceMode == .terminal ? "Terminal command" : "Message to Codex")
